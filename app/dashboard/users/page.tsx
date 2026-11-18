@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Permissions, PlantRole } from '@/lib/permissions'
+import { useCurrentUser } from '@/lib/useCurrentUser'
 
 interface UserProfile {
   id: string
@@ -15,7 +16,6 @@ export default function UserManagementPage() {
   const [users, setUsers] = useState<UserProfile[]>([])
   const [loading, setLoading] = useState(true)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
-  const [userRole, setUserRole] = useState<PlantRole | null>(null)
   // New user form state
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
@@ -24,40 +24,26 @@ export default function UserManagementPage() {
   const [submitting, setSubmitting] = useState(false)
   const router = useRouter()
 
+  const { role: userRole, userId: currentUserId, loading: authLoading } = useCurrentUser()
+
+  useEffect(() => {
+    if (!authLoading && userRole && !Permissions.canViewUsers(userRole)) router.replace('/dashboard')
+  }, [authLoading, userRole, router])
+
   const fetchUsers = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      router.push('/login')
-      return
-    }
-
-    // 2. Fetch user profile to check their role
-    const { data: profile } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-
-    if (profile?.role) {
-      setUserRole(profile.role as PlantRole)
-    }
-
     const { data, error } = await supabase
       .from('users')
       .select('id, full_name, role')
       .order('full_name', { ascending: true })
-
-    if (!error && data) {
-      setUsers(data as UserProfile[])
-    }
+    if (!error && data) setUsers(data as UserProfile[])
     setLoading(false)
   }
 
   useEffect(() => {
-    fetchUsers()
-  }, [])
+    if (!authLoading && userRole && Permissions.canViewUsers(userRole)) fetchUsers()
+  }, [authLoading, userRole])
 
-  const handleCreateUser = async (e: React.FormEvent) => {
+    const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
 
@@ -87,14 +73,18 @@ export default function UserManagementPage() {
   }
 
   const handleRoleChange = async (userId: string, newRole: PlantRole) => {
+    if (userId === currentUserId) return          // never edit your own role
     setUpdatingId(userId)
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('users')
       .update({ role: newRole })
       .eq('id', userId)
+      .select('id')                               // lets us detect a silent RLS block
 
     if (error) {
       alert('Error updating role: ' + error.message)
+    } else if (!data?.length) {
+      alert('Not permitted to change this role.')
     } else {
       fetchUsers()
     }
@@ -109,11 +99,14 @@ export default function UserManagementPage() {
       case 'team_leader': return 'Team Leader'
       case 'technician': return 'Technician'
       case 'shift_technician': return 'Shift Technician'
-      case 'stock_keeper': return 'Stock Keeper' // <-- Add this line here
+      case 'stock_keeper': return 'Stock Keeper'
       default: return r
     }
   }
 
+  if (authLoading || !userRole || !Permissions.canViewUsers(userRole)) {
+    return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading…</div>
+  }
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -235,6 +228,7 @@ export default function UserManagementPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
+                        {Permissions.canManageUsers(userRole) && u.id !== currentUserId ? (
                         <select
                           value={u.role || 'technician'}
                           disabled={updatingId === u.id}
@@ -249,6 +243,9 @@ export default function UserManagementPage() {
                           <option value="shift_technician">Shift Technician</option>
                           <option value="stock_keeper">Stock Keeper</option>
                         </select>
+                        ) : (
+    <span className="text-xs text-slate-400">{u.id === currentUserId ? 'You' : 'View only'}</span>
+  )}
                       </td>
                     </tr>
                   ))}

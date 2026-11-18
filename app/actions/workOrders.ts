@@ -1,100 +1,46 @@
-'use server';
+// app/actions/workOrders.ts  (equipment.ts / inventory.ts follow the same shape)
+'use server'
+import { revalidatePath } from 'next/cache'
+import { verifyUserRole } from '@/utils/supabase/auth-guard'
 
-import { createClient } from '@/utils/supabase/server';
-import { revalidatePath } from 'next/cache';
-import { verifyUserRole } from '@/utils/auth-guard';
+const PRIORITIES = ['low','medium','high','urgent']
+const STATUSES = ['assigned','in_progress','completed_pending_review','verified_closed']
+type Result = { success: true } | { success: false; error: string }
 
-// Helper to verify user and ensure Managers cannot write
-async function verifyOperationalWriteAccess() {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+export async function createWorkOrder(formData: FormData): Promise<Result> {
+  try {
+    const { supabase, user } = await verifyUserRole(['admin','superintendent','team_leader','shift_technician'])
+    const title = String(formData.get('title') ?? '').trim()
+    const priority = String(formData.get('priority') ?? 'medium')
+    if (!title) return { success: false, error: 'Title is required.' }
+    if (!PRIORITIES.includes(priority)) return { success: false, error: 'Invalid priority.' }
 
-  if (authError || !user) {
-    throw new Error('Unauthorized: Please log in.');
+    const { error } = await supabase.from('work_orders').insert({
+      title,
+      description: String(formData.get('description') ?? ''),
+      equipment_id: formData.get('equipment_id') || null,
+      team_leader_id: formData.get('team_leader_id'),
+      assigned_to: formData.get('assigned_to'),
+      priority, status: 'assigned', created_by: user.id,
+    })
+    if (error) return { success: false, error: error.message }
+    revalidatePath('/dashboard/work-orders')
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'Unexpected error' }
   }
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  if (profile?.role === 'manager') {
-    throw new Error('Access Denied: Managers have View-Only access.');
-  }
-
-  return { supabase, user, role: profile?.role };
 }
 
-export async function createWorkOrder(formData: FormData) {
+export async function updateWorkOrderStatus(id: string, status: string): Promise<Result> {
   try {
-    // ADD THIS LINE AT THE TOP (adjust roles per action)
-    const { supabase, user } = await verifyUserRole(['Admin', 'Superintendent', 'Team Leader']);
-  const { supabase, user } = await verifyOperationalWriteAccess();
-
-  const title = formData.get('title') as string;
-  const description = formData.get('description') as string;
-  const equipment_id = formData.get('equipment_id') as string;
-  const priority = (formData.get('priority') as string) || 'medium';
-
-  const { error } = await supabase.from('work_orders').insert({
-    title,
-    description,
-    equipment_id,
-    priority,
-    status: 'open',
-    created_by: user.id,
-  })};
-
-  if (error) {
-    throw new Error(`Failed to create work order: ${error.message}`);
-  }
-
-  revalidatePath('/work-orders');
-}
-
-export async function updateWorkOrderStatus(workOrderId: string, status: string) {
-  try {
-    // ADD THIS LINE AT THE TOP (adjust roles per action)
-    const { supabase, user } = await verifyUserRole(['Admin', 'Superintendent', 'Team Leader', 'Technician', 'Shift Technician']);
-  const { supabase } = await verifyOperationalWriteAccess();
-
-  const { error } = await supabase
-    .from('work_orders')
-    .update({ status })
-    .eq('id', workOrderId);
-
-  if (error) {
-    throw new Error(`Failed to update work order: ${error.message}`);
-  }
-
-  revalidatePath('/work-orders');
-}}
-
-export async function attachPartToWorkOrder(workOrderId: string, partId: string, quantity: number) {
-  try {
-    // 1. Enforce Role Guard (Technicians, Team Leaders, etc.)
-    const { supabase } = await verifyUserRole([
-      'Admin', 
-      'Superintendent', 
-      'Team Leader', 
-      'Technician', 
-      'Shift Technician'
-    ]);
-
-    // 2. Call the atomic PostgreSQL function instead of manual JS math
-    const { error } = await supabase.rpc('deduct_spare_part', {
-      p_part_id: partId,
-      p_quantity: quantity,
-      p_work_order_id: workOrderId
-    });
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    return { success: true };
-  } catch (err: any) {
-    return { success: false, error: err.message };
+    const { supabase } = await verifyUserRole(['admin','superintendent','team_leader','technician','shift_technician'])
+    if (!STATUSES.includes(status)) return { success: false, error: 'Invalid status.' }
+    const { data, error } = await supabase.from('work_orders').update({ status }).eq('id', id).select('id')
+    if (error) return { success: false, error: error.message }
+    if (!data?.length) return { success: false, error: 'Not permitted or work order not found.' }
+    revalidatePath('/dashboard/work-orders')
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'Unexpected error' }
   }
 }

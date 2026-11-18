@@ -2,7 +2,7 @@
 DO $$ DECLARE r record; BEGIN
   FOR r IN SELECT policyname, tablename FROM pg_policies
            WHERE schemaname='public'
-             AND tablename IN ('profiles','equipment','inventory','work_orders','pm_schedules','work_order_parts')
+             AND tablename IN ('users','equipment','inventory','work_orders','pm_schedules','work_order_parts')
   LOOP EXECUTE format('DROP POLICY %I ON public.%I', r.policyname, r.tablename); END LOOP;
 END $$;
 
@@ -10,15 +10,15 @@ ALTER TABLE public.work_order_parts ENABLE ROW LEVEL SECURITY;
 
 CREATE OR REPLACE FUNCTION public.get_user_role() RETURNS text
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
-$$ SELECT role FROM public.profiles WHERE id = auth.uid() $$;
+$$ SELECT role FROM public.users WHERE id = auth.uid() $$;
 REVOKE ALL ON FUNCTION public.get_user_role() FROM public, anon;
 GRANT EXECUTE ON FUNCTION public.get_user_role() TO authenticated;
 
--- profiles: nobody but admin can change a role (closes C2)
-CREATE POLICY profiles_read ON profiles FOR SELECT TO authenticated USING (true);
-CREATE POLICY profiles_admin_all ON profiles FOR ALL TO authenticated
+-- users: nobody but admin can change a role (closes C2)
+CREATE POLICY users_read ON users FOR SELECT TO authenticated USING (true);
+CREATE POLICY users_admin_all ON users FOR ALL TO authenticated
   USING (get_user_role() = 'admin') WITH CHECK (get_user_role() = 'admin');
-CREATE POLICY profiles_self_update ON profiles FOR UPDATE TO authenticated
+CREATE POLICY users_self_update ON users FOR UPDATE TO authenticated
   USING (id = auth.uid())
   WITH CHECK (id = auth.uid() AND role = get_user_role());
 
