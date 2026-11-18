@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { verifyUserRole } from '@/utils/auth-guard';
 
 async function verifyOperationalWriteAccess() {
   const supabase = await createClient();
@@ -25,6 +26,9 @@ async function verifyOperationalWriteAccess() {
 }
 
 export async function addInventoryItem(formData: FormData) {
+  try {
+    // ADD THIS LINE AT THE TOP (adjust roles per action)
+    const { supabase, user } = await verifyUserRole(['Admin', 'Stock Keeper']);
   const { supabase } = await verifyOperationalWriteAccess();
 
   const part_name = formData.get('part_name') as string;
@@ -37,7 +41,7 @@ export async function addInventoryItem(formData: FormData) {
     sku,
     quantity,
     min_stock,
-  });
+  })};
 
   if (error) {
     throw new Error(`Failed to add inventory item: ${error.message}`);
@@ -47,6 +51,9 @@ export async function addInventoryItem(formData: FormData) {
 }
 
 export async function adjustInventoryQuantity(itemId: string, newQuantity: number) {
+  try {
+    // ADD THIS LINE AT THE TOP (adjust roles per action)
+    const { supabase, user } = await verifyUserRole(['Admin', 'Stock Keeper']);
   const { supabase } = await verifyOperationalWriteAccess();
 
   if (newQuantity < 0) {
@@ -63,4 +70,4 @@ export async function adjustInventoryQuantity(itemId: string, newQuantity: numbe
   }
 
   revalidatePath('/inventory');
-}
+}}

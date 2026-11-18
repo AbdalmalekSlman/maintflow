@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { verifyUserRole } from '@/utils/auth-guard';
 
 // Helper to verify user and ensure Managers cannot write
 async function verifyOperationalWriteAccess() {
@@ -26,6 +27,9 @@ async function verifyOperationalWriteAccess() {
 }
 
 export async function createWorkOrder(formData: FormData) {
+  try {
+    // ADD THIS LINE AT THE TOP (adjust roles per action)
+    const { supabase, user } = await verifyUserRole(['Admin', 'Superintendent', 'Team Leader']);
   const { supabase, user } = await verifyOperationalWriteAccess();
 
   const title = formData.get('title') as string;
@@ -40,7 +44,7 @@ export async function createWorkOrder(formData: FormData) {
     priority,
     status: 'open',
     created_by: user.id,
-  });
+  })};
 
   if (error) {
     throw new Error(`Failed to create work order: ${error.message}`);
@@ -50,6 +54,9 @@ export async function createWorkOrder(formData: FormData) {
 }
 
 export async function updateWorkOrderStatus(workOrderId: string, status: string) {
+  try {
+    // ADD THIS LINE AT THE TOP (adjust roles per action)
+    const { supabase, user } = await verifyUserRole(['Admin', 'Superintendent', 'Team Leader', 'Technician', 'Shift Technician']);
   const { supabase } = await verifyOperationalWriteAccess();
 
   const { error } = await supabase
@@ -62,4 +69,32 @@ export async function updateWorkOrderStatus(workOrderId: string, status: string)
   }
 
   revalidatePath('/work-orders');
+}}
+
+export async function attachPartToWorkOrder(workOrderId: string, partId: string, quantity: number) {
+  try {
+    // 1. Enforce Role Guard (Technicians, Team Leaders, etc.)
+    const { supabase } = await verifyUserRole([
+      'Admin', 
+      'Superintendent', 
+      'Team Leader', 
+      'Technician', 
+      'Shift Technician'
+    ]);
+
+    // 2. Call the atomic PostgreSQL function instead of manual JS math
+    const { error } = await supabase.rpc('deduct_spare_part', {
+      p_part_id: partId,
+      p_quantity: quantity,
+      p_work_order_id: workOrderId
+    });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
 }

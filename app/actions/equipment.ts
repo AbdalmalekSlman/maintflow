@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { verifyUserRole } from '@/utils/auth-guard';
 
 async function verifyOperationalWriteAccess() {
   const supabase = await createClient();
@@ -25,6 +26,9 @@ async function verifyOperationalWriteAccess() {
 }
 
 export async function createEquipment(formData: FormData) {
+  try {
+    // ADD THIS LINE AT THE TOP (adjust roles per action)
+    const { supabase, user } = await verifyUserRole(['Admin', 'Superintendent', 'Team Leader']);
   const { supabase } = await verifyOperationalWriteAccess();
 
   const name = formData.get('name') as string;
@@ -44,9 +48,12 @@ export async function createEquipment(formData: FormData) {
   }
 
   revalidatePath('/equipment');
-}
+}}
 
 export async function updateEquipmentStatus(equipmentId: string, status: string) {
+  try {
+    // ADD THIS LINE AT THE TOP (adjust roles per action)
+    const { supabase, user } = await verifyUserRole(['Admin', 'Superintendent', 'Team Leader']);
   const { supabase } = await verifyOperationalWriteAccess();
 
   const { error } = await supabase
@@ -59,4 +66,4 @@ export async function updateEquipmentStatus(equipmentId: string, status: string)
   }
 
   revalidatePath('/equipment');
-}
+}}
