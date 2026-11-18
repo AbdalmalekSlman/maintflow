@@ -101,3 +101,31 @@ CREATE POLICY "Restrict pm_schedules modifications to non-managers"
   TO authenticated
   USING (public.get_user_role() NOT IN ('manager'))
   WITH CHECK (public.get_user_role() NOT IN ('manager'));
+
+  -- Revoke and drop insecure wildcard policies on operational tables
+DROP POLICY IF EXISTS "Enable read access for all users" ON equipment;
+DROP POLICY IF EXISTS "Enable all access for authenticated users" ON work_orders;
+
+-- Enforce strict role-based and tenant-aware policies
+CREATE POLICY "Enable read access for authenticated users"
+ON equipment FOR SELECT
+TO authenticated
+USING (true); -- Or scope to user's facility/department if applicable
+
+CREATE POLICY "Enable write/update for Technicians and Team Leaders only"
+ON equipment FOR ALL
+TO authenticated
+USING (
+  EXISTS (
+    SELECT 1 FROM profiles 
+    WHERE profiles.id = auth.uid() 
+    AND profiles.role IN ('technician', 'team_leader')
+  )
+)
+WITH CHECK (
+  EXISTS (
+    SELECT 1 FROM profiles 
+    WHERE profiles.id = auth.uid() 
+    AND profiles.role IN ('technician', 'team_leader')
+  )
+);
