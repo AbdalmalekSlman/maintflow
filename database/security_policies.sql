@@ -129,3 +129,27 @@ WITH CHECK (
     AND profiles.role IN ('technician', 'team_leader')
   )
 );
+
+-- Create a robust helper function to check user roles from JWT metadata or profiles table
+CREATE OR REPLACE FUNCTION public.get_user_role()
+RETURNS text AS $$
+BEGIN
+  RETURN (
+    SELECT role FROM public.profiles WHERE id = auth.uid()
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Enforce View-Only for Managers on Work Orders
+CREATE POLICY "Work Orders Insert Policy" ON work_orders
+FOR INSERT TO authenticated
+WITH CHECK (public.get_user_role() IN ('technician', 'team_leader'));
+
+CREATE POLICY "Work Orders Update Policy" ON work_orders
+FOR UPDATE TO authenticated
+USING (public.get_user_role() IN ('technician', 'team_leader'))
+WITH CHECK (public.get_user_role() IN ('technician', 'team_leader'));
+
+CREATE POLICY "Work Orders Delete Policy" ON work_orders
+FOR DELETE TO authenticated
+USING (public.get_user_role() IN ('team_leader')); -- Managers excluded entirely from delete
