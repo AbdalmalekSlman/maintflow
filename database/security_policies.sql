@@ -1,218 +1,108 @@
--- ============================================================================
--- MaintFlow Security Policies & Row Level Security (RLS) Configuration
--- ============================================================================
+-- Reset every policy on these tables
+DO $$ DECLARE r record; BEGIN
+  FOR r IN SELECT policyname, tablename FROM pg_policies
+           WHERE schemaname='public'
+             AND tablename IN ('profiles','equipment','inventory','work_orders','pm_schedules','work_order_parts')
+  LOOP EXECUTE format('DROP POLICY %I ON public.%I', r.policyname, r.tablename); END LOOP;
+END $$;
 
--- 1. Enable RLS across all core operational and profile tables
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE equipment ENABLE ROW LEVEL SECURITY;
-ALTER TABLE inventory ENABLE ROW LEVEL SECURITY;
-ALTER TABLE work_orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE pm_schedules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.work_order_parts ENABLE ROW LEVEL SECURITY;
 
--- 2. Helper Function: Fetch current user's role securely
-CREATE OR REPLACE FUNCTION public.get_user_role()
-RETURNS text
-SECURITY DEFINER
-SET search_path = public
-AS $$
+CREATE OR REPLACE FUNCTION public.get_user_role() RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
+$$ SELECT role FROM public.profiles WHERE id = auth.uid() $$;
+REVOKE ALL ON FUNCTION public.get_user_role() FROM public, anon;
+GRANT EXECUTE ON FUNCTION public.get_user_role() TO authenticated;
+
+-- profiles: nobody but admin can change a role (closes C2)
+CREATE POLICY profiles_read ON profiles FOR SELECT TO authenticated USING (true);
+CREATE POLICY profiles_admin_all ON profiles FOR ALL TO authenticated
+  USING (get_user_role() = 'admin') WITH CHECK (get_user_role() = 'admin');
+CREATE POLICY profiles_self_update ON profiles FOR UPDATE TO authenticated
+  USING (id = auth.uid())
+  WITH CHECK (id = auth.uid() AND role = get_user_role());
+
+-- equipment
+CREATE POLICY eq_read  ON equipment FOR SELECT TO authenticated USING (true);
+CREATE POLICY eq_write ON equipment FOR INSERT TO authenticated
+  WITH CHECK (get_user_role() IN ('admin','superintendent','team_leader'));
+CREATE POLICY eq_upd   ON equipment FOR UPDATE TO authenticated
+  USING (get_user_role() IN ('admin','superintendent','team_leader'))
+  WITH CHECK (get_user_role() IN ('admin','superintendent','team_leader'));
+CREATE POLICY eq_del   ON equipment FOR DELETE TO authenticated USING (get_user_role() = 'admin');
+
+-- inventory (matches Permissions.canManageInventory)
+CREATE POLICY inv_read ON inventory FOR SELECT TO authenticated USING (true);
+CREATE POLICY inv_ins  ON inventory FOR INSERT TO authenticated
+  WITH CHECK (get_user_role() IN ('admin','stock_keeper','superintendent','team_leader'));
+CREATE POLICY inv_upd  ON inventory FOR UPDATE TO authenticated
+  USING (get_user_role() IN ('admin','stock_keeper','superintendent','team_leader'))
+  WITH CHECK (get_user_role() IN ('admin','stock_keeper','superintendent','team_leader'));
+CREATE POLICY inv_del  ON inventory FOR DELETE TO authenticated USING (get_user_role() = 'admin');
+
+-- work_orders
+CREATE POLICY wo_read ON work_orders FOR SELECT TO authenticated
+  USING (get_user_role() NOT IN ('technician','shift_technician') OR assigned_to = auth.uid());
+CREATE POLICY wo_ins  ON work_orders FOR INSERT TO authenticated
+  WITH CHECK (get_user_role() IN ('admin','superintendent','team_leader','shift_technician'));
+CREATE POLICY wo_upd  ON work_orders FOR UPDATE TO authenticated
+  USING (get_user_role() IN ('admin','superintendent','team_leader')
+         OR (get_user_role() IN ('technician','shift_technician') AND assigned_to = auth.uid()))
+  WITH CHECK (get_user_role() IN ('admin','superintendent','team_leader')
+         OR (get_user_role() IN ('technician','shift_technician') AND assigned_to = auth.uid()));
+CREATE POLICY wo_del  ON work_orders FOR DELETE TO authenticated USING (get_user_role() = 'admin');
+
+-- only TL and above may verify and close
+CREATE OR REPLACE FUNCTION public.guard_wo_status() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-  RETURN (
-    SELECT role FROM public.profiles WHERE id = auth.uid()
-  );
-END;
-$$ LANGUAGE plpgsql;
+  IF NEW.status IS DISTINCT FROM OLD.status AND NEW.status = 'verified_closed'
+     AND public.get_user_role() NOT IN ('admin','superintendent','team_leader') THEN
+    RAISE EXCEPTION 'Only a Team Leader or above can close a work order';
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER trg_guard_wo_status BEFORE UPDATE ON work_orders
+  FOR EACH ROW EXECUTE FUNCTION guard_wo_status();
 
--- ============================================================================
--- 3. Profiles Table Policies
--- ============================================================================
-DROP POLICY IF EXISTS "Allow authenticated users to read profiles for RBAC" ON profiles;
-CREATE POLICY "Allow authenticated users to read profiles for RBAC"
-  ON profiles FOR SELECT
-  TO authenticated
-  USING (true);
+-- pm_schedules: TL can only create or hold pending items; Supt and Admin approve
+CREATE POLICY pm_read ON pm_schedules FOR SELECT TO authenticated USING (true);
+CREATE POLICY pm_ins  ON pm_schedules FOR INSERT TO authenticated
+  WITH CHECK (get_user_role() IN ('admin','superintendent')
+              OR (get_user_role() = 'team_leader' AND status = 'pending_approval'));
+CREATE POLICY pm_upd  ON pm_schedules FOR UPDATE TO authenticated
+  USING (get_user_role() IN ('admin','superintendent','team_leader'))
+  WITH CHECK (get_user_role() IN ('admin','superintendent')
+              OR (get_user_role() = 'team_leader' AND status IN ('pending_approval','completed')));
+CREATE POLICY pm_del  ON pm_schedules FOR DELETE TO authenticated USING (get_user_role() = 'admin');
 
-DROP POLICY IF EXISTS "Allow users to update their own profile" ON profiles;
-CREATE POLICY "Allow users to update their own profile"
-  ON profiles FOR UPDATE
-  TO authenticated
-  USING (auth.uid() = id)
-  WITH CHECK (auth.uid() = id);
+-- work_order_parts: read only; writes go through the RPC (no INSERT policy = denied)
+CREATE POLICY wop_read ON work_order_parts FOR SELECT TO authenticated USING (true);
 
--- ============================================================================
--- 4. Equipment Policies (Manager: View-Only | Others: Full Access)
--- ============================================================================
-DROP POLICY IF EXISTS "Allow read access for authenticated users on equipment" ON equipment;
-CREATE POLICY "Allow read access for authenticated users on equipment"
-  ON equipment FOR SELECT
-  TO authenticated
-  USING (true);
-
-DROP POLICY IF EXISTS "Restrict equipment modifications to non-managers" ON equipment;
-CREATE POLICY "Restrict equipment modifications to non-managers"
-  ON equipment FOR ALL
-  TO authenticated
-  USING (public.get_user_role() NOT IN ('manager'))
-  WITH CHECK (public.get_user_role() NOT IN ('manager'));
-
--- ============================================================================
--- 5. Inventory Policies (Manager: View-Only | Others: Full Access)
--- ============================================================================
-DROP POLICY IF EXISTS "Allow read access for authenticated users on inventory" ON inventory;
-CREATE POLICY "Allow read access for authenticated users on inventory"
-  ON inventory FOR SELECT
-  TO authenticated
-  USING (true);
-
-DROP POLICY IF EXISTS "Restrict inventory modifications to non-managers" ON inventory;
-CREATE POLICY "Restrict inventory modifications to non-managers"
-  ON inventory FOR ALL
-  TO authenticated
-  USING (public.get_user_role() NOT IN ('manager'))
-  WITH CHECK (public.get_user_role() NOT IN ('manager'));
-
--- ============================================================================
--- 6. Work Orders Policies (Manager: View-Only | Others: Full Access)
--- ============================================================================
-DROP POLICY IF EXISTS "Allow read access for authenticated users on work_orders" ON work_orders;
-CREATE POLICY "Allow read access for authenticated users on work_orders"
-  ON work_orders FOR SELECT
-  TO authenticated
-  USING (true);
-
-DROP POLICY IF EXISTS "Restrict work_orders modifications to non-managers" ON work_orders;
-CREATE POLICY "Restrict work_orders modifications to non-managers"
-  ON work_orders FOR ALL
-  TO authenticated
-  USING (public.get_user_role() NOT IN ('manager'))
-  WITH CHECK (public.get_user_role() NOT IN ('manager'));
-
--- ============================================================================
--- 7. PM Schedules Policies (Manager: View-Only | Others: Full Access)
--- ============================================================================
-DROP POLICY IF EXISTS "Allow read access for authenticated users on pm_schedules" ON pm_schedules;
-CREATE POLICY "Allow read access for authenticated users on pm_schedules"
-  ON pm_schedules FOR SELECT
-  TO authenticated
-  USING (true);
-
-DROP POLICY IF EXISTS "Restrict pm_schedules modifications to non-managers" ON pm_schedules;
-CREATE POLICY "Restrict pm_schedules modifications to non-managers"
-  ON pm_schedules FOR ALL
-  TO authenticated
-  USING (public.get_user_role() NOT IN ('manager'))
-  WITH CHECK (public.get_user_role() NOT IN ('manager'));
-
-  -- Revoke and drop insecure wildcard policies on operational tables
-DROP POLICY IF EXISTS "Enable read access for all users" ON equipment;
-DROP POLICY IF EXISTS "Enable all access for authenticated users" ON work_orders;
-DROP POLICY IF EXISTS "Enable read access for authenticated users" ON equipment;
-DROP POLICY IF EXISTS "Enable write/update for Technicians and Team Leaders only" ON equipment;
--- Enforce strict role-based and tenant-aware policies
-CREATE POLICY "Enable read access for authenticated users"
-ON equipment FOR SELECT
-TO authenticated
-USING (true); -- Or scope to user's facility/department if applicable
-
-CREATE POLICY "Enable write/update for Technicians and Team Leaders only"
-ON equipment FOR ALL
-TO authenticated
-USING (
-  EXISTS (
-    SELECT 1 FROM profiles 
-    WHERE profiles.id = auth.uid() 
-    AND profiles.role IN ('technician', 'team_leader')
-  )
-)
-WITH CHECK (
-  EXISTS (
-    SELECT 1 FROM profiles 
-    WHERE profiles.id = auth.uid() 
-    AND profiles.role IN ('technician', 'team_leader')
-  )
-);
-
--- Create a robust helper function to check user roles from JWT metadata or profiles table
-CREATE OR REPLACE FUNCTION public.get_user_role()
-RETURNS text AS $$
+CREATE OR REPLACE FUNCTION public.deduct_spare_part(p_part_id uuid, p_quantity int, p_work_order_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-  RETURN (
-    SELECT role FROM public.profiles WHERE id = auth.uid()
-  );
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+  IF public.get_user_role() IS NULL
+     OR public.get_user_role() IN ('manager','stock_keeper') THEN
+    RAISE EXCEPTION 'Forbidden';
+  END IF;
+  IF p_quantity IS NULL OR p_quantity < 1 THEN RAISE EXCEPTION 'Quantity must be at least 1'; END IF;
+  UPDATE inventory SET stock_quantity = stock_quantity - p_quantity, updated_at = now()
+   WHERE id = p_part_id AND stock_quantity >= p_quantity;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Insufficient stock'; END IF;
+  INSERT INTO work_order_parts (work_order_id, part_id, quantity_used, logged_by)
+  VALUES (p_work_order_id, p_part_id, p_quantity, auth.uid());
+END $$;
 
--- Enforce View-Only for Managers on Work Orders
-DROP POLICY IF EXISTS "Work Orders Insert Policy" ON work_orders;
-CREATE POLICY "Work Orders Insert Policy" ON work_orders
-FOR INSERT TO authenticated
-WITH CHECK (public.get_user_role() IN ('technician', 'team_leader'));
-DROP POLICY IF EXISTS "Work Orders Update Policy" ON work_orders;
-CREATE POLICY "Work Orders Update Policy" ON work_orders
-FOR UPDATE TO authenticated
-USING (public.get_user_role() IN ('technician', 'team_leader'))
-WITH CHECK (public.get_user_role() IN ('technician', 'team_leader'));
-DROP POLICY IF EXISTS "Work Orders Delete Policy" ON work_orders;
-CREATE POLICY "Work Orders Delete Policy" ON work_orders
-FOR DELETE TO authenticated
-USING (public.get_user_role() IN ('team_leader')); -- Managers excluded entirely from delete
--- Create or replace secure helper function to check user roles from public schema
-CREATE OR REPLACE FUNCTION public.get_user_role()
-RETURNS TEXT AS $$
+CREATE OR REPLACE FUNCTION public.adjust_stock(p_part_id uuid, p_delta int)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-  RETURN (
-    SELECT role 
-    FROM public.profiles 
-    WHERE id = auth.uid()
-  );
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+  IF public.get_user_role() NOT IN ('admin','stock_keeper','superintendent','team_leader') THEN
+    RAISE EXCEPTION 'Forbidden';
+  END IF;
+  UPDATE inventory SET stock_quantity = GREATEST(0, stock_quantity + p_delta), updated_at = now()
+   WHERE id = p_part_id;
+END $$;
 
--- ==========================================
--- EXAMPLE: WORK ORDERS RLS POLICIES
--- ==========================================
-ALTER TABLE public.work_orders ENABLE ROW LEVEL SECURITY;
-
--- 1. Read Policy: Technicians, Team Leaders, and Managers can view work orders
-DROP POLICY IF EXISTS "Enable read access for authenticated staff" ON public.work_orders;
-CREATE POLICY "Enable read access for authenticated staff"
-ON public.work_orders
-FOR SELECT
-TO authenticated
-USING (public.get_user_role() IN ('technician', 'team_leader', 'manager', 'admin'));
-
--- 2. Insert Policy: Strictly block Managers from inserting work orders
-DROP POLICY IF EXISTS "Enable insert for non-managers" ON public.work_orders;
-CREATE POLICY "Enable insert for non-managers"
-ON public.work_orders
-FOR INSERT
-TO authenticated
-WITH CHECK (public.get_user_role() IN ('technician', 'team_leader', 'admin'));
-
--- 3. Update Policy: Strictly block Managers from updating work orders
-DROP POLICY IF EXISTS "Enable update for non-managers" ON public.work_orders;
-CREATE POLICY "Enable update for non-managers"
-ON public.work_orders
-FOR UPDATE
-TO authenticated
-USING (public.get_user_role() IN ('technician', 'team_leader', 'admin'))
-WITH CHECK (public.get_user_role() IN ('technician', 'team_leader', 'admin'));
-
--- 4. Delete Policy: Strictly block Managers and Technicians from deleting work orders (Admin/Team Leader only)
-DROP POLICY IF EXISTS "Enable delete for privileged roles" ON public.work_orders;
-CREATE POLICY "Enable delete for privileged roles"
-ON public.work_orders
-FOR DELETE
-TO authenticated
-USING (public.get_user_role() IN ('team_leader', 'admin'));
-
--- INCORRECT (Insecure Wildcard):
--- CREATE POLICY "allow_all_updates" ON public.equipment FOR UPDATE USING (true);
-
--- SECURE REPLACEMENT:
-DROP POLICY IF EXISTS "Equipment update policy" ON public.equipment;
-CREATE POLICY "Equipment update policy"
-ON public.equipment
-FOR UPDATE
-TO authenticated
-USING (public.get_user_role() IN ('team_leader', 'admin'))
-WITH CHECK (public.get_user_role() IN ('team_leader', 'admin'));
+REVOKE ALL ON FUNCTION public.deduct_spare_part(uuid,int,uuid), public.adjust_stock(uuid,int) FROM public, anon;
+GRANT EXECUTE ON FUNCTION public.deduct_spare_part(uuid,int,uuid), public.adjust_stock(uuid,int) TO authenticated;
