@@ -35,7 +35,7 @@ export default function WorkOrdersPage() {
   const [usersList, setUsersList] = useState<UserOption[]>([])
   const [loading, setLoading] = useState(true)
   const [userRole, setUserRole] = useState<PlantRole | null>(null)
-const isReadOnly = userRole === 'manager'
+  const isReadOnly = userRole === 'manager' || userRole === 'stock_keeper'
   // Form state
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
