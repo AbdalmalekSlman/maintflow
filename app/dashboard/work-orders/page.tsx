@@ -85,6 +85,7 @@ export default function WorkOrdersPage() {
     if (eqData) setEquipmentList(eqData)
 
     const { data: userData } = await supabase.from('users').select('id, full_name, role')
+    
     if (userData) setUsersList(userData)
 
     setLoading(false)
@@ -137,7 +138,9 @@ export default function WorkOrdersPage() {
       fetchData()
     }
   }
-
+const teamLeaders = usersList?.filter((u) => u.role === 'team_leader') || []
+const technicians =
+  usersList?.filter((u) => u.role === 'technician' || u.role === 'shift_technician') || []
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -207,10 +210,12 @@ export default function WorkOrdersPage() {
                 onChange={(e) => setTeamLeaderId(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
               >
-                <option value="">-- Select Team Leader --</option>
-                {usersList.map((user) => (
-                  <option key={user.id} value={user.id}>{user.full_name} ({user.role})</option>
-                ))}
+                <option value="">Select Team Leader</option>
+  {teamLeaders.map((tl) => (
+    <option key={tl.id} value={tl.id}>
+      {tl.full_name}
+    </option>
+  ))}
               </select>
             </div>
 
@@ -222,10 +227,12 @@ export default function WorkOrdersPage() {
                 onChange={(e) => setAssignedTo(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
               >
-                <option value="">-- Select Technician --</option>
-                {usersList.map((user) => (
-                  <option key={user.id} value={user.id}>{user.full_name} ({user.role})</option>
-                ))}
+                <option value="">Select Technician</option>
+  {technicians.map((tech) => (
+    <option key={tech.id} value={tech.id}>
+      {tech.full_name}
+    </option>
+  ))}
               </select>
             </div>
 
