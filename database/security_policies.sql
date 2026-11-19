@@ -92,9 +92,13 @@ GRANT EXECUTE ON FUNCTION public.deduct_spare_part(uuid, integer) TO authenticat
 CREATE POLICY inv_read ON inventory FOR SELECT TO authenticated USING (true);
 CREATE POLICY inv_ins  ON inventory FOR INSERT TO authenticated
   WITH CHECK (get_user_role() IN ('admin','stock_keeper','superintendent','team_leader'));
-CREATE POLICY inv_upd  ON inventory FOR UPDATE TO authenticated
-  USING (get_user_role() IN ('admin','stock_keeper','superintendent','team_leader'))
-  WITH CHECK (get_user_role() IN ('admin','stock_keeper','superintendent','team_leader'));
+-- Direct inventory UPDATE is disabled.
+-- Stock quantity changes must use adjust_stock().
+DROP POLICY IF EXISTS inv_upd ON public.inventory;
+
+REVOKE UPDATE
+ON TABLE public.inventory
+FROM authenticated, anon, PUBLIC;
 CREATE POLICY inv_del  ON inventory FOR DELETE TO authenticated USING (get_user_role() = 'admin');
 
 -- work_orders
