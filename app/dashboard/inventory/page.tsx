@@ -78,17 +78,25 @@ export default function InventoryPage() {
     setSubmitting(false)
   }
 
-  const handleQuickRestock = async (id: string, currentQty: number, amount: number) => {
-    const newQty = Math.max(0, currentQty + amount)
-    const { error } = await supabase
-      .from('inventory')
-      .update({ stock_quantity: newQty, updated_at: new Date().toISOString() })
-      .eq('id', id)
+  
+const handleQuickRestock = async (
+  id: string,
+  _currentQty: number,
+  amount: number
+) => {
+  const { error } = await supabase.rpc('adjust_stock', {
+    p_part_id: id,
+    p_delta: amount,
+  })
 
-    if (!error) {
-      fetchInventory()
-    }
+  if (error) {
+    alert('Unable to update stock: ' + error.message)
+    return
   }
+
+  await fetchInventory()
+}
+
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">

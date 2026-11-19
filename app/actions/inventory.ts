@@ -1,73 +1,153 @@
-'use server';
 
-import { createClient } from '@/utils/supabase/server';
-import { revalidatePath } from 'next/cache';
-import { verifyUserRole } from '@/utils/auth-guard';
+'use server'
 
-async function verifyOperationalWriteAccess() {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+import { revalidatePath } from 'next/cache'
+import { verifyUserRole } from '@/utils/supabase/auth-guard'
 
-  if (authError || !user) {
-    throw new Error('Unauthorized: Please log in.');
+type ActionResult =
+  | { success: true }
+  | { success: false; error: string }
+
+const INVENTORY_ROLES = [
+  'admin',
+  'stock_keeper',
+  'superintendent',
+  'team_leader',
+] as const
+
+function parseNonNegativeInteger(
+  value: FormDataEntryValue | null,
+  fieldName: string
+): number {
+  const raw = String(value ?? '').trim()
+
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(
+      `${fieldName} must be a whole number greater than or equal to 0.`
+    )
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
+  const parsed = Number(raw)
 
-  if (profile?.role === 'manager') {
-    throw new Error('Access Denied: Managers have View-Only access.');
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${fieldName} is outside the supported range.`)
   }
 
-  return { supabase, user, role: profile?.role };
+  return parsed
 }
 
-export async function addInventoryItem(formData: FormData) {
+export async function addInventoryItem(
+  formData: FormData
+): Promise<ActionResult> {
   try {
-    // ADD THIS LINE AT THE TOP (adjust roles per action)
-    const { supabase, user } = await verifyUserRole(['Admin', 'Stock Keeper']);
-  const { supabase } = await verifyOperationalWriteAccess();
+    const { supabase } = await verifyUserRole([...INVENTORY_ROLES])
 
-  const part_name = formData.get('part_name') as string;
-  const sku = formData.get('sku') as string;
-  const quantity = Number(formData.get('quantity')) || 0;
-  const min_stock = Number(formData.get('min_stock')) || 5;
+    const partName = String(
+      formData.get('part_name') ?? ''
+    ).trim()
 
-  const { error } = await supabase.from('inventory').insert({
-    part_name,
-    sku,
-    quantity,
-    min_stock,
-  })};
+    const partNumber = String(
+      formData.get('part_number') ?? ''
+    ).trim()
 
-  if (error) {
-    throw new Error(`Failed to add inventory item: ${error.message}`);
+    const stockQuantity = parseNonNegativeInteger(
+      formData.get('stock_quantity'),
+      'Initial stock'
+    )
+
+    const minThreshold = parseNonNegativeInteger(
+      formData.get('min_threshold'),
+      'Minimum threshold'
+    )
+
+    if (!partName || !partNumber) {
+      return {
+        success: false,
+        error: 'Part name and part number are required.',
+      }
+    }
+
+    const { error } = await supabase
+      .from('inventory')
+      .insert({
+        part_name: partName,
+        part_number: partNumber,
+        stock_quantity: stockQuantity,
+        min_threshold: minThreshold,
+      })
+
+    if (error) {
+      return {
+        success: false,
+        error: `Failed to add inventory item: ${error.message}`,
+      }
+    }
+
+    revalidatePath('/dashboard/inventory')
+
+    return { success: true }
+
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Unexpected error while adding inventory item.',
+    }
   }
-
-  revalidatePath('/inventory');
 }
 
-export async function adjustInventoryQuantity(itemId: string, newQuantity: number) {
+/**
+ * Adjust stock using a signed quantity delta.
+ * Positive = restock.
+ * Negative = stock adjustment downward.
+ */
+export async function adjustInventoryQuantity(
+  itemId: string,
+  delta: number
+): Promise<ActionResult> {
   try {
-    // ADD THIS LINE AT THE TOP (adjust roles per action)
-    const { supabase, user } = await verifyUserRole(['Admin', 'Stock Keeper']);
-  const { supabase } = await verifyOperationalWriteAccess();
+    const { supabase } = await verifyUserRole([...INVENTORY_ROLES])
 
-  if (newQuantity < 0) {
-    throw new Error('Inventory quantity cannot be negative.');
+    if (!itemId?.trim()) {
+      return {
+        success: false,
+        error: 'Inventory item ID is required.',
+      }
+    }
+
+    if (!Number.isSafeInteger(delta) || delta === 0) {
+      return {
+        success: false,
+        error: 'Stock adjustment must be a non-zero whole number.',
+      }
+    }
+
+    const { error } = await supabase.rpc('adjust_stock', {
+      p_part_id: itemId,
+      p_delta: delta,
+    })
+
+    if (error) {
+      return {
+        success: false,
+        error: `Failed to adjust stock: ${error.message}`,
+      }
+    }
+
+    revalidatePath('/dashboard/inventory')
+    revalidatePath('/dashboard/work-orders')
+
+    return { success: true }
+
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Unexpected error while adjusting stock.',
+    }
   }
-
-  const { error } = await supabase
-    .from('inventory')
-    .update({ quantity: newQuantity })
-    .eq('id', itemId);
-
-  if (error) {
-    throw new Error(`Failed to update inventory quantity: ${error.message}`);
-  }
-
-  revalidatePath('/inventory');
-}}
+}

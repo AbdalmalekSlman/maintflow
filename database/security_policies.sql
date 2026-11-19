@@ -119,9 +119,13 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER trg_guard_wo_status BEFORE UPDATE ON work_orders
-  FOR EACH ROW EXECUTE FUNCTION guard_wo_status();
+DROP TRIGGER IF EXISTS trg_guard_wo_status
+ON public.work_orders;
 
+CREATE TRIGGER trg_guard_wo_status
+BEFORE UPDATE ON public.work_orders
+FOR EACH ROW
+EXECUTE FUNCTION public.guard_wo_status();
 -- pm_schedules: TL can only create or hold pending items; Supt and Admin approve
 CREATE POLICY pm_read ON pm_schedules FOR SELECT TO authenticated USING (true);
 CREATE POLICY pm_ins  ON pm_schedules FOR INSERT TO authenticated

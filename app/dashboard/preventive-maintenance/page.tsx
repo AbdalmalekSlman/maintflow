@@ -12,6 +12,7 @@ interface PMSchedule {
   frequency: string
   next_due_date: string
   status: string
+  equipment_id: string | null
   equipment?: {
     name: string
   }
@@ -23,6 +24,7 @@ interface EquipmentOption {
 }
 
 type PMFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'
+type DueUrgency = 'overdue' | 'upcoming' | 'normal'
 
 const ROLES_ALLOWED_TO_COMPLETE_PM: PlantRole[] = [
   'admin',
@@ -42,6 +44,30 @@ const normalizePMFrequency = (value: string): PMFrequency => {
     return lower
   }
   return 'monthly'
+}
+
+const getLocalDateISO = (): string => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const addDaysISO = (baseISO: string, days: number): string => {
+  const [y, m, d] = baseISO.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, (m || 1) - 1, (d || 1) + days))
+  return dt.toISOString().slice(0, 10)
+}
+
+const getDueUrgency = (nextDueDate: string, status: string): DueUrgency => {
+  if (!nextDueDate || status === 'completed') return 'normal'
+  const todayISO = getLocalDateISO()
+  const upcomingCutoffISO = addDaysISO(todayISO, 7)
+
+  if (nextDueDate < todayISO) return 'overdue'
+  if (nextDueDate <= upcomingCutoffISO) return 'upcoming'
+  return 'normal'
 }
 
 const calculateNextDueDate = (currentDueDate: string, frequency: string): string => {
@@ -108,10 +134,17 @@ export default function PreventiveMaintenancePage() {
   const [editNextDueDate, setEditNextDueDate] = useState('')
   const [savingScheduleEdit, setSavingScheduleEdit] = useState(false)
 
+  // PM-to-WO generation state (PM-07)
+  const [generatingWOId, setGeneratingWOId] = useState<string | null>(null)
+
   const router = useRouter()
 
   const canCompletePM = Boolean(userRole && ROLES_ALLOWED_TO_COMPLETE_PM.includes(userRole))
   const canEditScheduleInterval = userRole === 'superintendent' || userRole === 'admin'
+  const canGenerateWO = Boolean(userRole && userRole !== 'manager')
+
+  const overdueCount = schedules.filter((pm) => getDueUrgency(pm.next_due_date, pm.status) === 'overdue').length
+  const upcomingCount = schedules.filter((pm) => getDueUrgency(pm.next_due_date, pm.status) === 'upcoming').length
 
   const fetchData = async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -134,7 +167,7 @@ export default function PreventiveMaintenancePage() {
     // 2. Fetch PM Schedules
     const { data: pmData, error: pmError } = await supabase
       .from('pm_schedules')
-      .select('id, title, description, frequency, next_due_date, status, equipment:equipment_id(name)')
+      .select('id, title, description, frequency, next_due_date, status, equipment_id, equipment:equipment_id(name)')
       .order('next_due_date', { ascending: true })
 
     if (!pmError && pmData) {
@@ -329,21 +362,86 @@ export default function PreventiveMaintenancePage() {
     }
   }
 
+  const handleGenerateWorkOrder = async (pm: PMSchedule) => {
+    setActionMessage(null)
+
+    if (!canGenerateWO) {
+      setActionMessage({
+        type: 'error',
+        text: `Permission denied: role "${userRole || 'unknown'}" cannot generate work orders.`,
+      })
+      return
+    }
+
+    setGeneratingWOId(pm.id)
+
+    try {
+      const urgency = getDueUrgency(pm.next_due_date, pm.status)
+      const priority = urgency === 'overdue' ? 'high' : 'medium'
+
+      const { data, error } = await supabase
+        .from('work_orders')
+        .insert([
+          {
+            title: `PM: ${pm.title}`,
+            description:
+              pm.description ||
+              `Preventive maintenance (${pm.frequency}) scheduled for ${pm.next_due_date}`,
+            equipment_id: pm.equipment_id || null,
+            status: 'open',
+            priority,
+          },
+        ])
+        .select('id')
+
+      if (error) {
+        setActionMessage({
+          type: 'error',
+          text: `Failed to generate work order: ${error.message}`,
+        })
+        return
+      }
+
+      if (!data || data.length === 0) {
+        setActionMessage({
+          type: 'error',
+          text: 'Unable to create work order: permission denied or insert blocked (0 rows returned).',
+        })
+        return
+      }
+
+      setActionMessage({
+        type: 'success',
+        text: `Generated open work order for "${pm.title}" (${priority.toUpperCase()} priority).`,
+      })
+    } finally {
+      setGeneratingWOId(null)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-6xl mx-auto space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Preventive Maintenance (PM)</h1>
             <p className="text-sm text-slate-500">Scheduled inspections, recurring maintenance plans, and compliance tracking</p>
           </div>
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition"
-          >
-            ← Back to Dashboard
-          </button>
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
+              Overdue: {overdueCount}
+            </span>
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+              Due ≤ 7d: {upcomingCount}
+            </span>
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition"
+            >
+              ← Back to Dashboard
+            </button>
+          </div>
         </div>
 
         {/* Feedback Banner */}
@@ -471,9 +569,16 @@ export default function PreventiveMaintenancePage() {
                 <tbody className="divide-y divide-slate-200 text-slate-700">
                   {schedules.map((pm) => {
                     const isEditing = editingScheduleId === pm.id
+                    const urgency = getDueUrgency(pm.next_due_date, pm.status)
+                    const rowHighlightClass =
+                      urgency === 'overdue'
+                        ? 'bg-red-50/70 hover:bg-red-50'
+                        : urgency === 'upcoming'
+                        ? 'bg-amber-50/60 hover:bg-amber-50'
+                        : 'hover:bg-slate-50'
 
                     return (
-                      <tr key={pm.id} className="hover:bg-slate-50">
+                      <tr key={pm.id} className={rowHighlightClass}>
                         <td className="px-6 py-4">
                           <div className="font-medium text-slate-900">{pm.title}</div>
                           <div className="text-xs text-slate-500">{pm.description}</div>
@@ -507,7 +612,29 @@ export default function PreventiveMaintenancePage() {
                               className="px-2.5 py-1 border border-slate-300 rounded-md text-xs text-slate-900 bg-white"
                             />
                           ) : (
-                            pm.next_due_date
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={
+                                  urgency === 'overdue'
+                                    ? 'font-semibold text-red-700'
+                                    : urgency === 'upcoming'
+                                    ? 'font-semibold text-amber-800'
+                                    : ''
+                                }
+                              >
+                                {pm.next_due_date}
+                              </span>
+                              {urgency === 'overdue' && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-100 text-red-800 border border-red-200">
+                                  Overdue
+                                </span>
+                              )}
+                              {urgency === 'upcoming' && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+                                  Due Soon
+                                </span>
+                              )}
+                            </div>
                           )}
                         </td>
                         <td className="px-6 py-4">
@@ -546,6 +673,18 @@ export default function PreventiveMaintenancePage() {
                               </>
                             ) : (
                               <>
+                                {/* Generate Work Order from PM (PM-07) */}
+                                {canGenerateWO && (
+                                  <button
+                                    type="button"
+                                    disabled={generatingWOId === pm.id}
+                                    onClick={() => handleGenerateWorkOrder(pm)}
+                                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium transition disabled:opacity-50"
+                                  >
+                                    {generatingWOId === pm.id ? 'Creating WO...' : 'Create WO'}
+                                  </button>
+                                )}
+
                                 {/* Superintendent & Admin Approval Button */}
                                 {canEditScheduleInterval && pm.status === 'pending_approval' && (
                                   <button
