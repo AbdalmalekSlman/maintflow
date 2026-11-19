@@ -1,6 +1,6 @@
 'use client'
 
-iimport { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Permissions, PlantRole } from '@/lib/permissions'
