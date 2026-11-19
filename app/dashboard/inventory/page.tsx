@@ -27,6 +27,11 @@ export default function InventoryPage() {
   const isReadOnly = userRole === 'manager' || userRole === 'technician' || userRole === 'shift_technician';
   const fetchInventory = async () => {
     const { data: { user } } = await supabase.auth.getUser()
+     if (!user) {
+      setUserRole(null)
+      setLoading(false)
+      return
+    }
     const { data, error } = await supabase
       .from('inventory')
       .select('*')

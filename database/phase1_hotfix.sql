@@ -5,7 +5,9 @@
 -- ============================================================
 
 BEGIN;
-
+-- Remove legacy trigger that causes duplicate inventory deductions.
+DROP TRIGGER IF EXISTS trg_deduct_inventory
+ON public.work_order_parts;
 -- ============================================================
 -- 1. WORK ORDER INSERT POLICY
 -- Remove overlapping permissive policies.

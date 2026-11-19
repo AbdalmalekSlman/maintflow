@@ -12,9 +12,10 @@ interface WorkOrder {
   priority: 'low' | 'medium' | 'high' | 'urgent'
   status: 'assigned' | 'in_progress' | 'completed_pending_review' | 'verified_closed'
   created_at: string
-  equipment?: { name: string }
-  team_leader?: { full_name: string }
-  assignee?: { full_name: string }
+
+  equipment?: { name: string }[] | null
+  team_leader?: { full_name: string }[] | null
+  assignee?: { full_name: string }[] | null
 }
 
 interface EquipmentOption {
@@ -374,15 +375,15 @@ const canVerifyClose =
                     <p className="text-xs text-slate-400">
                       Equipment:{' '}
                       <span className="font-medium text-slate-700">
-                        {wo.equipment?.name || 'General Facility'}
+                        {wo.equipment?.[0]?.name || 'General Facility'}
                       </span>{' '}
                       • Team Leader:{' '}
                       <span className="font-medium text-slate-700">
-                        {wo.team_leader?.full_name || 'Unassigned'}
+                        {wo.team_leader?.[0]?.full_name || 'Unassigned'}
                       </span>{' '}
                       • Tech:{' '}
                       <span className="font-medium text-slate-700">
-                        {wo.assignee?.full_name || 'Unassigned'}
+                        {wo.assignee?.[0]?.full_name || 'Unassigned'}
                       </span>
                     </p>
                   </div>

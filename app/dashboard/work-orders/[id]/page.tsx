@@ -12,9 +12,20 @@ interface WorkOrder {
   priority: string
   status: string
   outcome_notes: string
-  equipment?: { name: string; asset_tag: string; location: string }
-  team_leader?: { full_name: string }
-  assignee?: { full_name: string }
+
+  equipment?: {
+    name: string
+    asset_tag: string
+    location: string
+  }[] | null
+
+  team_leader?: {
+    full_name: string
+  }[] | null
+
+  assignee?: {
+    full_name: string
+  }[] | null
 }
 
 interface InventoryPart {
@@ -54,6 +65,7 @@ const savingOutcomeRef = useRef(false)
   const canApproveClose =
     userRole === 'admin' || userRole === 'superintendent' || userRole === 'team_leader'
 const selectedPart = inventoryList.find((p) => p.id === selectedPartId)
+const equipment = workOrder?.equipment?.[0]
   const fetchWorkOrderDetails = async () => {
     if (!workOrderId) return
 
@@ -279,13 +291,13 @@ if (notFound) {
             <div>
               <span className="text-xs text-slate-400 block uppercase font-semibold">Team Leader</span>
               <span className="text-sm font-medium text-slate-800 mt-1 block">
-                {workOrder?.team_leader?.full_name || 'Unassigned'}
+                {workOrder?.team_leader?.[0]?.full_name || 'Unassigned'}
               </span>
             </div>
             <div>
               <span className="text-xs text-slate-400 block uppercase font-semibold">Technician</span>
               <span className="text-sm font-medium text-slate-800 mt-1 block">
-                {workOrder?.assignee?.full_name || 'Unassigned'}
+                {workOrder?.assignee?.[0]?.full_name || 'Unassigned'}
               </span>
             </div>
           </div>
@@ -299,18 +311,24 @@ if (notFound) {
             </p>
           </div>
 
-          {workOrder?.equipment && (
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-1">
-              <h3 className="text-xs font-semibold text-slate-500 uppercase">Target Asset</h3>
-              <p className="text-sm font-semibold text-slate-900">
-                {workOrder.equipment.name}{' '}
-                <span className="font-mono text-xs text-slate-500">
-                  ({workOrder.equipment.asset_tag})
-                </span>
-              </p>
-              <p className="text-xs text-slate-600">Location: {workOrder.equipment.location}</p>
-            </div>
-          )}
+          {equipment && (
+  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-1">
+    <h3 className="text-xs font-semibold text-slate-500 uppercase">
+      Target Asset
+    </h3>
+
+    <p className="text-sm font-semibold text-slate-900">
+      {equipment.name}{' '}
+      <span className="font-mono text-xs text-slate-500">
+        ({equipment.asset_tag})
+      </span>
+    </p>
+
+    <p className="text-xs text-slate-600">
+      Location: {equipment.location}
+    </p>
+  </div>
+)}
         </div>
 
         {/* Log Spare Parts Section */}
