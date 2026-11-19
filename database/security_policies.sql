@@ -283,3 +283,157 @@ begin
   return new;
 end;
 $$;
+
+
+create or replace function public.log_work_order_part(
+  p_work_order_id uuid,
+  p_part_id uuid,
+  p_quantity_used integer
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_id uuid := auth.uid();
+  v_actor_role text;
+  v_wo_status text;
+  v_current_stock integer;
+begin
+  if v_actor_id is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if p_quantity_used is null or p_quantity_used <= 0 then
+    raise exception 'Quantity used must be greater than 0';
+  end if;
+
+  select role into v_actor_role
+  from public.users
+  where id = v_actor_id;
+
+  if coalesce(v_actor_role, '') not in ('technician', 'shift_technician', 'team_leader', 'superintendent', 'admin') then
+    raise exception 'Role ''%'' is not permitted to log spare parts', coalesce(v_actor_role, 'unknown');
+  end if;
+
+  select status into v_wo_status
+  from public.work_orders
+  where id = p_work_order_id;
+
+  if not found then
+    raise exception 'Work order not found';
+  end if;
+
+  if v_wo_status = 'verified_closed' then
+    raise exception 'Cannot log parts on a verified_closed work order';
+  end if;
+
+  -- Lock the inventory row to prevent race conditions
+  select stock_quantity into v_current_stock
+  from public.inventory
+  where id = p_part_id
+  for update;
+
+  if not found then
+    raise exception 'Spare part not found';
+  end if;
+
+  if v_current_stock < p_quantity_used then
+    raise exception 'Insufficient stock: available %, requested %', v_current_stock, p_quantity_used;
+  end if;
+
+  insert into public.work_order_parts (
+    work_order_id,
+    part_id,
+    quantity_used,
+    logged_by
+  )
+  values (
+    p_work_order_id,
+    p_part_id,
+    p_quantity_used,
+    v_actor_id
+  );
+
+  update public.inventory
+  set stock_quantity = stock_quantity - p_quantity_used
+  where id = p_part_id;
+end;
+$$;
+
+grant execute on function public.log_work_order_part(uuid, uuid, integer) to authenticated;
+
+create or replace function public.log_work_order_part(
+  p_work_order_id uuid,
+  p_part_id uuid,
+  p_quantity_used integer
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_id uuid := auth.uid();
+  v_actor_role text;
+  v_wo_status text;
+  v_current_stock integer;
+begin
+  if v_actor_id is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if p_quantity_used is null or p_quantity_used <= 0 then
+    raise exception 'Quantity used must be greater than 0';
+  end if;
+
+  select role into v_actor_role
+  from public.users
+  where id = v_actor_id;
+
+  if coalesce(v_actor_role, '') not in ('technician', 'shift_technician', 'team_leader', 'superintendent', 'admin') then
+    raise exception 'Role ''%'' is not permitted to log spare parts', coalesce(v_actor_role, 'unknown');
+  end if;
+
+  select status into v_wo_status
+  from public.work_orders
+  where id = p_work_order_id;
+
+  if not found then
+    raise exception 'Work order not found';
+  end if;
+
+  if v_wo_status = 'verified_closed' then
+    raise exception 'Cannot log parts on a verified_closed work order';
+  end if;
+
+  -- Lock the inventory row and validate sufficient stock
+  select stock_quantity into v_current_stock
+  from public.inventory
+  where id = p_part_id
+  for update;
+
+  if not found then
+    raise exception 'Spare part not found';
+  end if;
+
+  if v_current_stock < p_quantity_used then
+    raise exception 'Insufficient stock: available %, requested %', v_current_stock, p_quantity_used;
+  end if;
+
+  -- Insert row; the existing AFTER INSERT trigger on work_order_parts deducts stock once
+  insert into public.work_order_parts (
+    work_order_id,
+    part_id,
+    quantity_used,
+    logged_by
+  )
+  values (
+    p_work_order_id,
+    p_part_id,
+    p_quantity_used,
+    v_actor_id
+  );
+end;
+$$;

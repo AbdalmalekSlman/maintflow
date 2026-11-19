@@ -125,20 +125,22 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
   const handleLogPart = async (e: React.FormEvent) => {
     e.preventDefault()
     if (isReadOnly || isClosed || !selectedPartId) return
+    const qty = parseInt(quantityUsed, 10)
+  if (!qty || qty <= 0) {
+    alert('Please enter a valid quantity greater than 0.')
+    return
+  }
     setSubmittingPart(true)
 
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
-    const { error } = await supabase.from('work_order_parts').insert([
-      {
-        work_order_id: workOrderId,
-        part_id: selectedPartId,
-        quantity_used: parseInt(quantityUsed, 10) || 1,
-        logged_by: user?.id,
-      },
-    ])
+  const { error } = await supabase.rpc('log_work_order_part', {
+    p_work_order_id: workOrderId,
+    p_part_id: selectedPartId,
+    p_quantity_used: qty,
+  })
 
     if (error) {
       alert('Error logging part: ' + error.message)
