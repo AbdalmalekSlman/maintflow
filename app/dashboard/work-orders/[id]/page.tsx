@@ -42,10 +42,23 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
   const [loading, setLoading] = useState(true)
   const [submittingPart, setSubmittingPart] = useState(false)
   const router = useRouter()
-
+const [userRole, setUserRole] = useState<PlantRole | null>(null)
+const isReadOnly = userRole === 'manager'
   const fetchWorkOrderDetails = async () => {
     if (!workOrderId) return
+    // Fetch current user's role so Manager stays strictly view-only
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      const { data: profile } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', user.id)
+        .single()
 
+      if (profile?.role) {
+        setUserRole(profile.role as PlantRole)
+      }
+    }
     // Fetch Work Order with team_leader and assignee relations
     const { data: woData, error: woError } = await supabase
       .from('work_orders')
@@ -97,7 +110,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
 
   const handleLogPart = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedPartId) return
+    if (isReadOnly || !selectedPartId) return
     setSubmittingPart(true)
 
     const { data: { user } } = await supabase.auth.getUser()
@@ -122,6 +135,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
   }
 
   const handleSaveOutcome = async () => {
+    if (isReadOnly) return
     const { error } = await supabase
       .from('work_orders')
       .update({
@@ -203,6 +217,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
         </div>
 
         {/* Log Spare Parts Section */}
+        {!isReadOnly && (
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <h2 className="text-lg font-semibold text-slate-800">Log Spare Parts Used</h2>
           <form onSubmit={handleLogPart} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
@@ -259,8 +274,10 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
             </div>
           )}
         </div>
+)}
 
         {/* Outcome Notes & Completion */}
+        {!isReadOnly && (
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <h2 className="text-lg font-semibold text-slate-800">Outcome & Completion Notes</h2>
           <textarea
@@ -280,6 +297,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
             </button>
           </div>
         </div>
+        )}
       </div>
     </div>
   )
