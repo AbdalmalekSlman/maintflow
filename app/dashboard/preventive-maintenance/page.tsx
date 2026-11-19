@@ -22,21 +22,31 @@ interface EquipmentOption {
   name: string
 }
 
+type PMFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'
+
+const ROLES_ALLOWED_TO_COMPLETE_PM: PlantRole[] = [
+  'admin',
+  'superintendent',
+  'team_leader',
+]
+
 export default function PreventiveMaintenancePage() {
   const [userRole, setUserRole] = useState<PlantRole | null>(null)
   const [schedules, setSchedules] = useState<PMSchedule[]>([])
   const [equipmentList, setEquipmentList] = useState<EquipmentOption[]>([])
   const [loading, setLoading] = useState(true)
-  
+  const [actionMessage, setActionMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null)
+
   // Form state
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [equipmentId, setEquipmentId] = useState('')
-  
   const [nextDueDate, setNextDueDate] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'>('monthly')
+  const [frequency, setFrequency] = useState<PMFrequency>('monthly')
   const router = useRouter()
+
+  const canCompletePM = Boolean(userRole && ROLES_ALLOWED_TO_COMPLETE_PM.includes(userRole))
 
   const fetchData = async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -83,9 +93,10 @@ export default function PreventiveMaintenancePage() {
     fetchData()
   }, [router])
 
- const handleCreatePM = async (e: React.FormEvent) => {
+  const handleCreatePM = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
+    setActionMessage(null)
 
     // Superintendents and Admins create pre-approved schedules; Team Leaders submit for approval
     const initialStatus = userRole === 'team_leader' ? 'pending_approval' : 'active'
@@ -111,36 +122,71 @@ export default function PreventiveMaintenancePage() {
       setEquipmentId('')
       setFrequency('monthly')
       setNextDueDate('')
-      fetchData()
+      await fetchData()
     }
 
     setSubmitting(false)
   }
 
   const handleApprovePM = async (scheduleId: string) => {
-    const { error } = await supabase
+    setActionMessage(null)
+
+    const { data, error } = await supabase
       .from('pm_schedules')
       .update({ status: 'active' })
       .eq('id', scheduleId)
+      .select('id')
 
     if (error) {
       alert('Error approving PM: ' + error.message)
+    } else if (!data || data.length === 0) {
+      setActionMessage({
+        type: 'error',
+        text: 'Permission denied: unable to approve this PM schedule.',
+      })
     } else {
-      fetchData()
+      await fetchData()
     }
   }
 
   const handleCompletePM = async (scheduleId: string) => {
-    const { error } = await supabase
+    setActionMessage(null)
+
+    if (!canCompletePM) {
+      setActionMessage({
+        type: 'error',
+        text: `Permission denied: role "${userRole || 'unknown'}" is not authorized to mark PM schedules as completed.`,
+      })
+      return
+    }
+
+    const { data, error } = await supabase
       .from('pm_schedules')
       .update({ status: 'completed' })
       .eq('id', scheduleId)
+      .select('id')
 
     if (error) {
-      alert('Error updating PM status: ' + error.message)
-    } else {
-      fetchData()
+      setActionMessage({
+        type: 'error',
+        text: `Unable to mark PM completed: ${error.message}`,
+      })
+      return
     }
+
+    if (!data || data.length === 0) {
+      setActionMessage({
+        type: 'error',
+        text: 'Permission denied or PM schedule no longer available (0 rows updated).',
+      })
+      return
+    }
+
+    setActionMessage({
+      type: 'success',
+      text: 'PM schedule marked as completed.',
+    })
+    await fetchData()
   }
 
   return (
@@ -160,7 +206,20 @@ export default function PreventiveMaintenancePage() {
           </button>
         </div>
 
-        {/* Create PM Form - Visible only to Admin, Superintendent, and Team Leader (Hidden for Manager & Technicians) */}
+        {/* Feedback Banner */}
+        {actionMessage && (
+          <div
+            className={`px-4 py-3 rounded-xl border text-sm font-medium ${
+              actionMessage.type === 'error'
+                ? 'bg-red-50 text-red-700 border-red-200'
+                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            }`}
+          >
+            {actionMessage.text}
+          </div>
+        )}
+
+        {/* Create PM Form - Visible only to Admin, Superintendent, and Team Leader */}
         {userRole && Permissions.canManagePM(userRole) && (
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-800 mb-4">Schedule Preventive Maintenance</h2>
@@ -197,17 +256,17 @@ export default function PreventiveMaintenancePage() {
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Frequency</label>
                 <select
-  value={frequency}
-  disabled={submitting}
-  onChange={(e) => setFrequency(e.target.value)}
-  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
->
-  <option value="daily">Daily</option>
-  <option value="weekly">Weekly</option>
-  <option value="monthly">Monthly</option>
-  <option value="quarterly">Quarterly</option>
-  <option value="yearly">Yearly</option>
-</select>
+                  value={frequency}
+                  disabled={submitting}
+                  onChange={(e) => setFrequency(e.target.value as PMFrequency)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                >
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
               </div>
 
               <div>
@@ -299,8 +358,8 @@ export default function PreventiveMaintenancePage() {
                           </button>
                         )}
 
-                        {/* Execution Button (Hidden for Manager since Manager is View Only) */}
-                        {userRole && userRole !== 'manager' && pm.status === 'active' && (
+                        {/* Execution Button - Only for roles authorized to complete PMs */}
+                        {canCompletePM && pm.status === 'active' && (
                           <button
                             onClick={() => handleCompletePM(pm.id)}
                             className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-medium transition"
