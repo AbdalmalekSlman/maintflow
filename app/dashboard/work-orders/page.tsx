@@ -1,16 +1,26 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Permissions, PlantRole } from '@/lib/permissions'
+type WorkOrderPriority =
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'urgent'
 
+type WorkOrderStatus =
+  | 'assigned'
+  | 'in_progress'
+  | 'completed_pending_review'
+  | 'verified_closed'
 interface WorkOrder {
   id: string
   title: string
   description: string
-  priority: 'low' | 'medium' | 'high' | 'urgent'
-  status: 'assigned' | 'in_progress' | 'completed_pending_review' | 'verified_closed'
+  priority: WorkOrderPriority
+status: WorkOrderStatus
   created_at: string
 
   equipment?: { name: string }[] | null
@@ -41,7 +51,7 @@ export default function WorkOrdersPage() {
   // Form state
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium')
+  const [priority, setPriority] = useState<WorkOrderPriority>('medium')
   const [equipmentId, setEquipmentId] = useState('')
   const [teamLeaderId, setTeamLeaderId] = useState('')
   const [assignedTo, setAssignedTo] = useState('')
@@ -54,7 +64,7 @@ export default function WorkOrdersPage() {
   const isShiftTech = userRole === 'shift_technician'
 const canVerifyClose =
   userRole === 'admin' || userRole === 'superintendent' || userRole === 'team_leader'
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true)
 
     // 1. Get current logged-in user session
@@ -110,17 +120,17 @@ const canVerifyClose =
     if (userData) setUsersList(userData)
 
     setLoading(false)
-  }
+    }, [])
 
-  useEffect(() => {
-    fetchData()
-  }, [])
+ useEffect(() => {
+  const timer = window.setTimeout(() => {
+    void fetchData()
+  }, 0)
 
-  useEffect(() => {
-    if (isShiftTech && currentUserId) {
-      setAssignedTo(currentUserId)
-    }
-  }, [isShiftTech, currentUserId])
+  return () => window.clearTimeout(timer)
+}, [fetchData])
+
+  
 
   const handleCreateWorkOrder = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -173,7 +183,10 @@ const canVerifyClose =
     setSubmitting(false)
   }
 
-  const updateStatus = async (id: string, newStatus: WorkOrder['status']) => {
+  const updateStatus = async (
+  id: string,
+  newStatus: WorkOrderStatus
+) => {
     if (isReadOnly) return
 
     const { error } = await supabase
@@ -234,7 +247,9 @@ const canVerifyClose =
                 <label className="block text-xs font-medium text-slate-600 mb-1">Priority</label>
                 <select
                   value={priority}
-                  onChange={(e) => setPriority(e.target.value as any)}
+                  onChange={(e) =>
+  setPriority(e.target.value as WorkOrderPriority)
+}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
                 >
                   <option value="low">Low</option>
@@ -409,7 +424,9 @@ const canVerifyClose =
                     ) : (
                       <select
                         value={wo.status}
-                        onChange={(e) => updateStatus(wo.id, e.target.value as any)}
+                        onChange={(e) =>
+  updateStatus(wo.id, e.target.value as WorkOrderStatus)
+}
                         className="px-2.5 py-1 text-xs font-medium bg-white border border-slate-300 rounded-lg text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-600"
                       >
                         <option value="assigned">Assigned</option>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Permissions, PlantRole } from '@/lib/permissions'
@@ -30,18 +30,30 @@ export default function UserManagementPage() {
     if (!authLoading && userRole && !Permissions.canViewUsers(userRole)) router.replace('/dashboard')
   }, [authLoading, userRole, router])
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     const { data, error } = await supabase
       .from('users')
       .select('id, full_name, role')
       .order('full_name', { ascending: true })
     if (!error && data) setUsers(data as UserProfile[])
     setLoading(false)
-  }
+    }, [])
 
   useEffect(() => {
-    if (!authLoading && userRole && Permissions.canViewUsers(userRole)) fetchUsers()
-  }, [authLoading, userRole])
+  if (
+    authLoading ||
+    !userRole ||
+    !Permissions.canViewUsers(userRole)
+  ) {
+    return
+  }
+
+  const timer = window.setTimeout(() => {
+    void fetchUsers()
+  }, 0)
+
+  return () => window.clearTimeout(timer)
+}, [authLoading, userRole, fetchUsers])
 
     const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -66,9 +78,14 @@ export default function UserManagementPage() {
         setRole('technician')
         fetchUsers()
       }
-    } catch (err: any) {
-      alert('Error: ' + err.message)
-    }
+    } catch (err: unknown) {
+  const message =
+    err instanceof Error
+      ? err.message
+      : 'An unexpected error occurred.'
+
+  alert('Error: ' + message)
+}
     setSubmitting(false)
   }
 

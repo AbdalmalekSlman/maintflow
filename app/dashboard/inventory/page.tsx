@@ -1,6 +1,5 @@
 'use client'
-
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Permissions, PlantRole } from '@/lib/permissions'
@@ -25,7 +24,7 @@ export default function InventoryPage() {
   const router = useRouter()
   const [userRole, setUserRole] = useState<PlantRole | null>(null)
   const isReadOnly = userRole === 'manager' || userRole === 'technician' || userRole === 'shift_technician';
-  const fetchInventory = async () => {
+  const fetchInventory = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
      if (!user) {
       setUserRole(null)
@@ -52,11 +51,15 @@ export default function InventoryPage() {
     if (profile?.role) {
       setUserRole(profile.role as PlantRole) // <-- Add this line
     }
-  }
+    }, [])
 
   useEffect(() => {
-    fetchInventory()
-  }, [])
+  const timer = window.setTimeout(() => {
+    void fetchInventory()
+  }, 0)
+
+  return () => window.clearTimeout(timer)
+}, [fetchInventory])
 
   const handleAddPart = async (e: React.FormEvent) => {
     e.preventDefault()

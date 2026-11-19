@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Permissions, PlantRole } from '@/lib/permissions'
@@ -146,7 +146,7 @@ export default function PreventiveMaintenancePage() {
   const overdueCount = schedules.filter((pm) => getDueUrgency(pm.next_due_date, pm.status) === 'overdue').length
   const upcomingCount = schedules.filter((pm) => getDueUrgency(pm.next_due_date, pm.status) === 'upcoming').length
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       router.replace('/')
@@ -185,12 +185,15 @@ export default function PreventiveMaintenancePage() {
     }
 
     setLoading(false)
-  }
-
-  useEffect(() => {
-    fetchData()
   }, [router])
 
+  useEffect(() => {
+  const timer = window.setTimeout(() => {
+    void fetchData()
+  }, 0)
+
+  return () => window.clearTimeout(timer)
+}, [fetchData])
   const handleCreatePM = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)

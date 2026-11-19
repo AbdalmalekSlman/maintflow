@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useEffect, useRef, useState } from 'react'
+import { use, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { PlantRole } from '@/lib/permissions'
@@ -66,7 +66,7 @@ const savingOutcomeRef = useRef(false)
     userRole === 'admin' || userRole === 'superintendent' || userRole === 'team_leader'
 const selectedPart = inventoryList.find((p) => p.id === selectedPartId)
 const equipment = workOrder?.equipment?.[0]
-  const fetchWorkOrderDetails = async () => {
+  const fetchWorkOrderDetails = useCallback(async () => {
     if (!workOrderId) return
 
     // Fetch current user's role so view-only roles stay restricted
@@ -128,13 +128,19 @@ if (woError || !woData) {
     }
 
     setLoading(false)
-  }
+   }, [workOrderId, router])
 
-  useEffect(() => {
-    if (workOrderId) {
-      fetchWorkOrderDetails()
-    }
-  }, [workOrderId])
+useEffect(() => {
+  if (!workOrderId) return
+
+  const timer = window.setTimeout(() => {
+    void fetchWorkOrderDetails()
+  }, 0)
+
+  return () => {
+    window.clearTimeout(timer)
+  }
+}, [fetchWorkOrderDetails, workOrderId])
 
   
 

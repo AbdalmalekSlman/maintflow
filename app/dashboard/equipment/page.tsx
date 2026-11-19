@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Permissions, PlantRole } from '@/lib/permissions'
@@ -52,53 +52,68 @@ export default function EquipmentPage() {
   const [historyError, setHistoryError] = useState<string | null>(null)
   const router = useRouter()
 
-  const fetchEquipment = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.replace('/')
-        return
-      }
+  
 
-      // Fetch user profile and store role
-      const { data: profile } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', user.id)
-        .single()
-
-      if (profile?.role) {
-        setUserRole(profile.role as PlantRole)
-      }
-
-      // Fetch equipment list
-      const { data, error } = await supabase
-        .from('equipment')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) {
-        console.error('Error fetching equipment:', error.message)
-      } else if (data) {
-        setEquipment(data as EquipmentItem[])
-      }
-    } catch (err) {
-      console.error('Unexpected error:', err)
-    } finally {
-      // Guaranteed to run, clearing the loading spinner whether it succeeds or fails
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchEquipment()
+const fetchEquipment = useCallback(async () => {
+  try {
     const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
-        router.replace('/')
-      }
-    })
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      router.replace('/')
+      return
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+
+    if (profileError) {
+      console.error('Error fetching user profile:', profileError.message)
+    } else if (profile?.role) {
+      setUserRole(profile.role as PlantRole)
+    }
+
+    const { data, error } = await supabase
+      .from('equipment')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching equipment:', error.message)
+    } else if (data) {
+      setEquipment(data as EquipmentItem[])
+    }
+  } catch (err: unknown) {
+    console.error('Unexpected error:', err)
+  } finally {
+    setLoading(false)
+  }
+}, [router])
+
+
+
+useEffect(() => {
+  const timer = window.setTimeout(() => {
+    void fetchEquipment()
+  }, 0)
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    if (!session) {
+      router.replace('/')
+    }
+  })
+
+  return () => {
+    window.clearTimeout(timer)
+    subscription.unsubscribe()
+  }
+}, [fetchEquipment, router])
 
     return () => {
       subscription.unsubscribe()
