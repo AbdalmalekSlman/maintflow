@@ -20,8 +20,11 @@ export default function InventoryPage() {
   const [stockQuantity, setStockQuantity] = useState('10')
   const [minThreshold, setMinThreshold] = useState('5')
   const [submitting, setSubmitting] = useState(false)
+  
+  
   const router = useRouter()
   const [userRole, setUserRole] = useState<PlantRole | null>(null)
+  const isReadOnly = userRole === 'manager' || userRole === 'technician' || userRole === 'shift_technician';
   const fetchInventory = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     const { data, error } = await supabase
@@ -182,7 +185,7 @@ export default function InventoryPage() {
                     <th className="px-6 py-3 font-medium">Part Number</th>
                     <th className="px-6 py-3 font-medium">In Stock</th>
                     <th className="px-6 py-3 font-medium">Status</th>
-                    <th className="px-6 py-3 font-medium text-right">Quick Restock</th>
+                    {!isReadOnly && (<th className="px-6 py-3 font-medium text-right">Quick Restock</th>)}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 text-slate-700">
@@ -206,6 +209,7 @@ export default function InventoryPage() {
                             </span>
                           )}
                         </td>
+                        {!isReadOnly && (
                         <td className="px-6 py-4 text-right space-x-2">
                           <button
                             onClick={() => handleQuickRestock(item.id, item.stock_quantity, 1)}
@@ -220,6 +224,7 @@ export default function InventoryPage() {
                             +5
                           </button>
                         </td>
+                        )}
                       </tr>
                     )
                   })}

@@ -1,3 +1,12 @@
+-- Explicitly enable RLS on all application tables
+ALTER TABLE IF EXISTS public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.equipment ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.inventory ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.work_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.work_order_parts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.pm_schedules ENABLE ROW LEVEL SECURITY;
+
+
 -- Reset every policy on these tables
 DO $$ DECLARE r record; BEGIN
   FOR r IN SELECT policyname, tablename FROM pg_policies
@@ -30,7 +39,55 @@ CREATE POLICY eq_upd   ON equipment FOR UPDATE TO authenticated
   USING (get_user_role() IN ('admin','superintendent','team_leader'))
   WITH CHECK (get_user_role() IN ('admin','superintendent','team_leader'));
 CREATE POLICY eq_del   ON equipment FOR DELETE TO authenticated USING (get_user_role() = 'admin');
+-- Create or replace deduct_spare_part with strict role enforcement
+CREATE OR REPLACE FUNCTION public.deduct_spare_part(
+  p_part_id uuid,
+  p_quantity integer
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_role text;
+BEGIN
+  -- 1. Require an authenticated user
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Unauthorized: authentication required';
+  END IF;
 
+  -- 2. Look up caller role
+  SELECT role INTO v_role
+  FROM public.users
+  WHERE id = auth.uid();
+
+  -- 3. Block manager (view-only) and any unrecognized role
+  IF v_role IS NULL OR v_role = 'manager' THEN
+    RAISE EXCEPTION 'Forbidden: role "%" is not allowed to deduct spare parts', COALESCE(v_role, 'none');
+  END IF;
+
+  -- 4. Validate quantity
+  IF p_quantity IS NULL OR p_quantity <= 0 THEN
+    RAISE EXCEPTION 'Invalid quantity: must be greater than 0';
+  END IF;
+
+  -- 5. Deduct stock safely
+  UPDATE public.inventory
+  SET stock_quantity = stock_quantity - p_quantity
+  WHERE id = p_part_id
+    AND stock_quantity >= p_quantity;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Insufficient stock or part not found';
+  END IF;
+END;
+$$;
+
+-- Lock down function execution permissions
+REVOKE ALL ON FUNCTION public.deduct_spare_part(uuid, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.deduct_spare_part(uuid, integer) FROM anon;
+GRANT EXECUTE ON FUNCTION public.deduct_spare_part(uuid, integer) TO authenticated;
 -- inventory (matches Permissions.canManageInventory)
 CREATE POLICY inv_read ON inventory FOR SELECT TO authenticated USING (true);
 CREATE POLICY inv_ins  ON inventory FOR INSERT TO authenticated

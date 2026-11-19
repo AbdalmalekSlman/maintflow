@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   })
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
-  // 3. Write to profiles (the table RLS actually reads)
+  // 3. Write to users (the table RLS actually reads)
   const { error: pErr } = await admin.from('users')
     .insert({ id: data.user.id, email, full_name: full_name.trim(), role })
   if (pErr) {
