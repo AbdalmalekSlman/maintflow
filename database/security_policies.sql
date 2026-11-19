@@ -197,3 +197,47 @@ alter table public.work_orders
 alter table public.work_orders
   add constraint work_orders_title_not_blank
   check (char_length(btrim(title)) > 0);
+
+  -- Example trigger function enforcing valid initial & transitioned statuses
+create or replace function public.enforce_work_order_status_rules()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  actor_role text;
+begin
+  select role into actor_role
+  from public.users
+  where id = auth.uid();
+
+  if tg_op = 'INSERT' then
+    -- New work orders must start as 'assigned' (unless an authorized supervisory role sets another valid initial state if needed)
+    if new.status is distinct from 'assigned' then
+      raise exception 'New work orders must be created with status ''assigned''';
+    end if;
+
+    return new;
+  end if;
+
+  -- Existing UPDATE transition / role checks stay here
+  if tg_op = 'UPDATE' then
+    if new.status = 'verified_closed'
+       and coalesce(actor_role, '') not in ('admin', 'superintendent', 'team_leader') then
+      raise exception 'Role ''%'' is not permitted to set status to ''verified_closed''', coalesce(actor_role, 'unknown');
+    end if;
+
+    return new;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_work_order_status on public.work_orders;
+
+create trigger trg_enforce_work_order_status
+before insert or update on public.work_orders
+for each row
+execute function public.enforce_work_order_status_rules();
