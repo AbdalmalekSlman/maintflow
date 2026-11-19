@@ -50,7 +50,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
   const isReadOnly = userRole === 'manager' || userRole === 'stock_keeper'
   const canApproveClose =
     userRole === 'admin' || userRole === 'superintendent' || userRole === 'team_leader'
-
+const selectedPart = inventoryList.find((p) => p.id === selectedPartId)
   const fetchWorkOrderDetails = async () => {
     if (!workOrderId) return
 
@@ -122,19 +122,26 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
     }
   }, [workOrderId])
 
-  const handleLogPart = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (isReadOnly || isClosed || !selectedPartId) return
-    const qty = parseInt(quantityUsed, 10)
+  
+
+const handleLogPart = async (e: React.FormEvent) => {
+  e.preventDefault()
+  if (isReadOnly || isClosed || !selectedPartId) return
+
+  const qty = parseInt(quantityUsed, 10)
   if (!qty || qty <= 0) {
     alert('Please enter a valid quantity greater than 0.')
     return
   }
-    setSubmittingPart(true)
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+  if (selectedPart && qty > selectedPart.stock_quantity) {
+    alert(
+      `Insufficient stock: only ${selectedPart.stock_quantity} available for ${selectedPart.part_name}.`
+    )
+    return
+  }
+
+  setSubmittingPart(true)
 
   const { error } = await supabase.rpc('log_work_order_part', {
     p_work_order_id: workOrderId,
@@ -142,15 +149,16 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
     p_quantity_used: qty,
   })
 
-    if (error) {
-      alert('Error logging part: ' + error.message)
-    } else {
-      setSelectedPartId('')
-      setQuantityUsed('1')
-      await fetchWorkOrderDetails()
-    }
-    setSubmittingPart(false)
+  if (error) {
+    alert('Error logging part: ' + error.message)
+  } else {
+    setSelectedPartId('')
+    setQuantityUsed('1')
+    await fetchWorkOrderDetails()
   }
+
+  setSubmittingPart(false)
+}
 
   const handleSaveOutcome = async () => {
     if (isReadOnly || !workOrder) return
@@ -291,19 +299,20 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
                   Select Spare Part
                 </label>
                 <select
-                  required
-                  disabled={isClosed || submittingPart}
-                  value={selectedPartId}
-                  onChange={(e) => setSelectedPartId(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-600"
-                >
-                  <option value="">Choose part from inventory...</option>
-                  {inventoryList.map((part) => (
-                    <option key={part.id} value={part.id}>
-                      {part.part_name} ({part.part_number}) — In Stock: {part.stock_quantity}
-                    </option>
-                  ))}
-                </select>
+  required
+  disabled={isClosed || submittingPart}
+  value={selectedPartId}
+  onChange={(e) => setSelectedPartId(e.target.value)}
+  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-600"
+>
+  <option value="">Choose part from inventory...</option>
+  {inventoryList.map((part) => (
+    <option key={part.id} value={part.id} disabled={part.stock_quantity <= 0}>
+      {part.part_name} ({part.part_number}) — In Stock: {part.stock_quantity}
+      {part.stock_quantity <= 0 ? ' (Out of Stock)' : ''}
+    </option>
+  ))}
+</select>
               </div>
 
               <div>
@@ -312,14 +321,15 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
                 </label>
                 <div className="flex gap-2">
                   <input
-                    type="number"
-                    min="1"
-                    required
-                    disabled={isClosed || submittingPart}
-                    value={quantityUsed}
-                    onChange={(e) => setQuantityUsed(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  />
+  type="number"
+  min="1"
+  max={selectedPart?.stock_quantity ?? undefined}
+  required
+  disabled={isClosed || submittingPart}
+  value={quantityUsed}
+  onChange={(e) => setQuantityUsed(e.target.value)}
+  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-600"
+/>
                   <button
                     type="submit"
                     disabled={isClosed || submittingPart}
