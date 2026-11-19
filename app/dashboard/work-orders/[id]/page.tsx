@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useEffect, useState } from 'react'
+import { use, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { PlantRole } from '@/lib/permissions'
@@ -43,6 +43,8 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
   const [loading, setLoading] = useState(true)
   const [submittingPart, setSubmittingPart] = useState(false)
   const [savingOutcome, setSavingOutcome] = useState(false)
+const savingOutcomeRef = useRef(false)
+  
   const [userRole, setUserRole] = useState<PlantRole | null>(null)
   const [notFound, setNotFound] = useState(false)
   const router = useRouter()
@@ -166,15 +168,18 @@ const handleLogPart = async (e: React.FormEvent) => {
   setSubmittingPart(false)
 }
 
-  const handleSaveOutcome = async () => {
-    if (isReadOnly || !workOrder) return
+ const handleSaveOutcome = async () => {
+  if (isReadOnly || !workOrder || savingOutcomeRef.current) return
 
-    if (workOrder.status === 'verified_closed') {
-      alert('This work order is already verified and closed and cannot be modified or reopened.')
-      return
-    }
+  if (workOrder.status === 'verified_closed') {
+    alert('This work order is already verified and closed and cannot be modified or reopened.')
+    return
+  }
 
-    setSavingOutcome(true)
+  savingOutcomeRef.current = true
+  setSavingOutcome(true)
+
+  try {
     const nextStatus = canApproveClose ? 'verified_closed' : 'completed_pending_review'
 
     const { error } = await supabase
@@ -197,8 +202,11 @@ const handleLogPart = async (e: React.FormEvent) => {
       )
       await fetchWorkOrderDetails()
     }
+  } finally {
+    savingOutcomeRef.current = false
     setSavingOutcome(false)
   }
+}
 
   if (loading) {
     return (
@@ -417,17 +425,17 @@ if (notFound) {
             />
             <div className="flex justify-end">
               <button
-                type="button"
-                disabled={isClosed || savingOutcome}
-                onClick={handleSaveOutcome}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-              >
-                {isClosed
-                  ? 'Verified Closed'
-                  : savingOutcome
-                  ? 'Saving...'
-                  : 'Save Notes & Complete Task'}
-              </button>
+  type="button"
+  disabled={isClosed || savingOutcome}
+  onClick={handleSaveOutcome}
+  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+>
+  {isClosed
+    ? 'Verified Closed'
+    : savingOutcome
+    ? 'Saving...'
+    : 'Save Notes & Complete Task'}
+</button>
             </div>
           </div>
         )}
