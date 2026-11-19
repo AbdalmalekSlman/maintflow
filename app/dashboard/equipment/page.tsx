@@ -8,8 +8,8 @@ import { Permissions, PlantRole } from '@/lib/permissions'
 interface EquipmentItem {
   id: string
   name: string
-  asset_tag: string
-  location: string
+  asset_tag: string | null
+  location: string | null
   status: 'operational' | 'under_maintenance' | 'out_of_service'
 }
 
@@ -21,7 +21,6 @@ export default function EquipmentPage() {
   const [location, setLocation] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [userRole, setUserRole] = useState<PlantRole | null>(null)
-  
   const router = useRouter()
 
   const fetchEquipment = async () => {
@@ -68,26 +67,46 @@ export default function EquipmentPage() {
 
   const handleAddEquipment = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    const trimmedName = name.trim()
+    if (!trimmedName) {
+      alert('Please enter an equipment name.')
+      return
+    }
+
+    const normalizedTag = serialNumber.trim() || null
     setSubmitting(true)
 
-    const { error } = await supabase.from('equipment').insert([
-      {
-        name,
-        asset_tag: serialNumber,
-        location,
-        status: 'operational',
-      },
-    ])
+    try {
+      const { error } = await supabase.from('equipment').insert([
+        {
+          name: trimmedName,
+          asset_tag: normalizedTag,
+          location: location.trim() || null,
+          status: 'operational',
+        },
+      ])
 
-    if (error) {
-      alert('Error adding equipment: ' + error.message)
-    } else {
+      if (error) {
+        if (error.code === '23505') {
+          alert(
+            normalizedTag
+              ? `An asset with Asset Tag "${normalizedTag}" already exists. Please use a unique Asset Tag.`
+              : 'An asset with this Asset Tag already exists. Please use a unique Asset Tag.'
+          )
+        } else {
+          alert('Error adding equipment: ' + error.message)
+        }
+        return
+      }
+
       setName('')
       setSerialNumber('')
       setLocation('')
-      fetchEquipment()
+      await fetchEquipment()
+    } finally {
+      setSubmitting(false)
     }
-    setSubmitting(false)
   }
 
   return (
@@ -107,56 +126,56 @@ export default function EquipmentPage() {
         </div>
 
         {/* Add Equipment Form */}
-        {userRole && Permissions.canEditEquipment(userRole
-        ) && (
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-800 mb-4">Register New Equipment</h2>
-          <form onSubmit={handleAddEquipment} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Equipment Name</label>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. CNC Milling Machine #2"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Serial Number</label>
-              <input
-                type="text"
-                required
-                value={serialNumber}
-                onChange={(e) => setSerialNumber(e.target.value)}
-                placeholder="e.g. SN-4421-Y"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Location</label>
-              <input
-                type="text"
-                required
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="e.g. Building B - Bay 4"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-            <div className="md:col-span-3 flex justify-end">
-              <button
-                type="submit"
-                disabled={submitting}
-                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 shadow-sm"
-              >
-                {submitting ? 'Registering...' : 'Register Equipment'}
-              </button>
-            </div>
-          </form>
-        </div>
+        {userRole && Permissions.canEditEquipment(userRole) && (
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-800 mb-4">Register New Equipment</h2>
+            <form onSubmit={handleAddEquipment} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Equipment Name</label>
+                <input
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. CNC Milling Machine #2"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Asset Tag</label>
+                <input
+                  type="text"
+                  required
+                  value={serialNumber}
+                  onChange={(e) => setSerialNumber(e.target.value)}
+                  placeholder="e.g. TAG-4421-Y"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Location</label>
+                <input
+                  type="text"
+                  required
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="e.g. Building B - Bay 4"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+              <div className="md:col-span-3 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 shadow-sm"
+                >
+                  {submitting ? 'Registering...' : 'Register Equipment'}
+                </button>
+              </div>
+            </form>
+          </div>
         )}
+
         {/* Equipment List Table */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-200">
@@ -172,7 +191,7 @@ export default function EquipmentPage() {
                 <thead>
                   <tr className="bg-slate-50 text-slate-600 border-b border-slate-200">
                     <th className="px-6 py-3 font-medium">Name</th>
-                    <th className="px-6 py-3 font-medium">Serial Number</th>
+                    <th className="px-6 py-3 font-medium">Asset Tag</th>
                     <th className="px-6 py-3 font-medium">Location</th>
                     <th className="px-6 py-3 font-medium">Status</th>
                   </tr>
@@ -181,8 +200,8 @@ export default function EquipmentPage() {
                   {equipment.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50">
                       <td className="px-6 py-4 font-medium text-slate-900">{item.name}</td>
-                      <td className="px-6 py-4 font-mono text-xs text-slate-600">{item.asset_tag}</td>
-                      <td className="px-6 py-4">{item.location}</td>
+                      <td className="px-6 py-4 font-mono text-xs text-slate-600">{item.asset_tag || '—'}</td>
+                      <td className="px-6 py-4">{item.location || '—'}</td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
                           item.status === 'operational'

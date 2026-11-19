@@ -445,3 +445,14 @@ alter table public.work_order_parts
 alter table public.work_order_parts
   add constraint work_order_parts_quantity_positive
   check (quantity_used > 0);
+
+
+  -- Optional: clean up leading/trailing whitespace on existing tags first
+update public.equipment
+set asset_tag = btrim(asset_tag)
+where asset_tag is not null and asset_tag <> btrim(asset_tag);
+
+-- Case-insensitive unique index on non-null asset_tag values
+create unique index if not exists equipment_asset_tag_unique_idx
+  on public.equipment (lower(btrim(asset_tag)))
+  where asset_tag is not null and btrim(asset_tag) <> '';
