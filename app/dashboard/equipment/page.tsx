@@ -118,7 +118,7 @@ useEffect(() => {
     return () => {
       subscription.unsubscribe()
     }
-  }, [router])
+  
 
   const handleAddEquipment = async (e: React.FormEvent) => {
     e.preventDefault()
