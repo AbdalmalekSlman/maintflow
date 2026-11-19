@@ -456,3 +456,11 @@ where asset_tag is not null and asset_tag <> btrim(asset_tag);
 create unique index if not exists equipment_asset_tag_unique_idx
   on public.equipment (lower(btrim(asset_tag)))
   where asset_tag is not null and btrim(asset_tag) <> '';
+
+  update public.equipment
+set status = 'operational'
+where status is null;
+
+alter table public.equipment
+  alter column status set default 'operational',
+  alter column status set not null;

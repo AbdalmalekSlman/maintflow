@@ -5,12 +5,21 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Permissions, PlantRole } from '@/lib/permissions'
 
+type EquipmentStatus = 'operational' | 'under_maintenance' | 'out_of_service'
+
+const normalizeEquipmentStatus = (status?: string | null): EquipmentStatus => {
+  if (status === 'under_maintenance' || status === 'out_of_service' || status === 'operational') {
+    return status
+  }
+  return 'operational'
+}
+
 interface EquipmentItem {
   id: string
   name: string
   asset_tag: string | null
   location: string | null
-  status: 'operational' | 'under_maintenance' | 'out_of_service'
+  status: EquipmentStatus | null
 }
 
 interface MaintenanceHistoryItem {
@@ -22,8 +31,6 @@ interface MaintenanceHistoryItem {
   completed_at: string | null
   outcome_notes: string | null
 }
-
-
 
 export default function EquipmentPage() {
   const [equipment, setEquipment] = useState<EquipmentItem[]>([])
@@ -37,12 +44,12 @@ export default function EquipmentPage() {
   const [editName, setEditName] = useState('')
   const [editAssetTag, setEditAssetTag] = useState('')
   const [editLocation, setEditLocation] = useState('')
-  const [editStatus, setEditStatus] = useState<'operational' | 'under_maintenance' | 'out_of_service'>('operational')
+  const [editStatus, setEditStatus] = useState<EquipmentStatus>('operational')
   const [savingEdit, setSavingEdit] = useState(false)
   const [selectedHistoryAsset, setSelectedHistoryAsset] = useState<EquipmentItem | null>(null)
-const [historyItems, setHistoryItems] = useState<MaintenanceHistoryItem[]>([])
-const [loadingHistory, setLoadingHistory] = useState(false)
-const [historyError, setHistoryError] = useState<string | null>(null)
+  const [historyItems, setHistoryItems] = useState<MaintenanceHistoryItem[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
   const router = useRouter()
 
   const fetchEquipment = async () => {
@@ -147,7 +154,7 @@ const [historyError, setHistoryError] = useState<string | null>(null)
     setEditName(item.name)
     setEditAssetTag(item.asset_tag ?? '')
     setEditLocation(item.location ?? '')
-    setEditStatus(item.status)
+    setEditStatus(normalizeEquipmentStatus(item.status))
   }
 
   const cancelEditing = () => {
@@ -194,54 +201,56 @@ const [historyError, setHistoryError] = useState<string | null>(null)
 
       cancelEditing()
       if (selectedHistoryAsset?.id === id) {
-  setSelectedHistoryAsset((prev) =>
-    prev
-      ? {
-          ...prev,
-          name: trimmedName,
-          asset_tag: normalizedTag,
-          location: editLocation.trim() || null,
-          status: editStatus,
-        }
-      : null
-  )
-}
+        setSelectedHistoryAsset((prev) =>
+          prev
+            ? {
+                ...prev,
+                name: trimmedName,
+                asset_tag: normalizedTag,
+                location: editLocation.trim() || null,
+                status: editStatus,
+              }
+            : null
+        )
+      }
       await fetchEquipment()
     } finally {
       setSavingEdit(false)
     }
   }
-const handleViewHistory = async (item: EquipmentItem) => {
-  setSelectedHistoryAsset(item)
-  setHistoryItems([])
-  setHistoryError(null)
-  setLoadingHistory(true)
 
-  try {
-    const { data, error } = await supabase
-      .from('work_orders')
-      .select('id, title, status, priority, created_at, completed_at, outcome_notes')
-      .eq('equipment_id', item.id)
-      .order('created_at', { ascending: false })
+  const handleViewHistory = async (item: EquipmentItem) => {
+    setSelectedHistoryAsset(item)
+    setHistoryItems([])
+    setHistoryError(null)
+    setLoadingHistory(true)
 
-    if (error) {
-      setHistoryError(error.message)
-    } else {
-      setHistoryItems((data as MaintenanceHistoryItem[]) || [])
+    try {
+      const { data, error } = await supabase
+        .from('work_orders')
+        .select('id, title, status, priority, created_at, completed_at, outcome_notes')
+        .eq('equipment_id', item.id)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        setHistoryError(error.message)
+      } else {
+        setHistoryItems((data as MaintenanceHistoryItem[]) || [])
+      }
+    } catch (err) {
+      setHistoryError('Failed to load maintenance history.')
+      console.error('Error loading maintenance history:', err)
+    } finally {
+      setLoadingHistory(false)
     }
-  } catch (err) {
-    setHistoryError('Failed to load maintenance history.')
-    console.error('Error loading maintenance history:', err)
-  } finally {
-    setLoadingHistory(false)
   }
-}
 
-const closeHistory = () => {
-  setSelectedHistoryAsset(null)
-  setHistoryItems([])
-  setHistoryError(null)
-}
+  const closeHistory = () => {
+    setSelectedHistoryAsset(null)
+    setHistoryItems([])
+    setHistoryError(null)
+  }
+
   const canEdit = Boolean(userRole && Permissions.canEditEquipment(userRole))
 
   return (
@@ -312,158 +321,155 @@ const closeHistory = () => {
         )}
 
         {/* Equipment List Table */}
-<div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-  <div className="px-6 py-4 border-b border-slate-200">
-    <h2 className="font-semibold text-slate-800">Registered Assets ({equipment.length})</h2>
-  </div>
-  {loading ? (
-    <div className="p-8 text-center text-slate-500">Loading equipment...</div>
-  ) : equipment.length === 0 ? (
-    <div className="p-8 text-center text-slate-500">No equipment registered yet. Add your first asset above!</div>
-  ) : (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left border-collapse text-sm">
-        <thead>
-          <tr className="bg-slate-50 text-slate-600 border-b border-slate-200">
-            <th className="px-6 py-3 font-medium">Name</th>
-            <th className="px-6 py-3 font-medium">Asset Tag</th>
-            <th className="px-6 py-3 font-medium">Location</th>
-            <th className="px-6 py-3 font-medium">Status</th>
-            <th className="px-6 py-3 font-medium text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-200 text-slate-700">
-          {equipment.map((item) => {
-            const isEditing = editingId === item.id
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-200">
+            <h2 className="font-semibold text-slate-800">Registered Assets ({equipment.length})</h2>
+          </div>
+          {loading ? (
+            <div className="p-8 text-center text-slate-500">Loading equipment...</div>
+          ) : equipment.length === 0 ? (
+            <div className="p-8 text-center text-slate-500">No equipment registered yet. Add your first asset above!</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-sm">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                    <th className="px-6 py-3 font-medium">Name</th>
+                    <th className="px-6 py-3 font-medium">Asset Tag</th>
+                    <th className="px-6 py-3 font-medium">Location</th>
+                    <th className="px-6 py-3 font-medium">Status</th>
+                    <th className="px-6 py-3 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 text-slate-700">
+                  {equipment.map((item) => {
+                    const isEditing = editingId === item.id
+                    const currentStatus = normalizeEquipmentStatus(item.status)
 
-            return (
-              <tr key={item.id} className="hover:bg-slate-50">
-                <td className="px-6 py-4 font-medium text-slate-900">
-                  {isEditing ? (
-                    <input
-                      type="text"
-                      value={editName}
-                      disabled={savingEdit}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md text-sm text-slate-900"
-                    />
-                  ) : (
-                    item.name
-                  )}
-                </td>
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-50">
+                        <td className="px-6 py-4 font-medium text-slate-900">
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={editName}
+                              disabled={savingEdit}
+                              onChange={(e) => setEditName(e.target.value)}
+                              className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md text-sm text-slate-900"
+                            />
+                          ) : (
+                            item.name
+                          )}
+                        </td>
 
-                <td className="px-6 py-4 font-mono text-xs text-slate-600">
-                  {isEditing ? (
-                    <input
-                      type="text"
-                      value={editAssetTag}
-                      disabled={savingEdit}
-                      onChange={(e) => setEditAssetTag(e.target.value)}
-                      className="w-full px-2.5 py-1.5 font-mono text-xs border border-slate-300 rounded-md text-slate-900"
-                    />
-                  ) : (
-                    item.asset_tag || '—'
-                  )}
-                </td>
+                        <td className="px-6 py-4 font-mono text-xs text-slate-600">
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={editAssetTag}
+                              disabled={savingEdit}
+                              onChange={(e) => setEditAssetTag(e.target.value)}
+                              className="w-full px-2.5 py-1.5 font-mono text-xs border border-slate-300 rounded-md text-slate-900"
+                            />
+                          ) : (
+                            item.asset_tag || '—'
+                          )}
+                        </td>
 
-                <td className="px-6 py-4">
-                  {isEditing ? (
-                    <input
-                      type="text"
-                      value={editLocation}
-                      disabled={savingEdit}
-                      onChange={(e) => setEditLocation(e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md text-sm text-slate-900"
-                    />
-                  ) : (
-                    item.location || '—'
-                  )}
-                </td>
+                        <td className="px-6 py-4">
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={editLocation}
+                              disabled={savingEdit}
+                              onChange={(e) => setEditLocation(e.target.value)}
+                              className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md text-sm text-slate-900"
+                            />
+                          ) : (
+                            item.location || '—'
+                          )}
+                        </td>
 
-                <td className="px-6 py-4">
-                  {isEditing ? (
-                    <select
-                      value={editStatus}
-                      disabled={savingEdit}
-                      onChange={(e) =>
-                        setEditStatus(
-                          e.target.value as 'operational' | 'under_maintenance' | 'out_of_service'
-                        )
-                      }
-                      className="px-2.5 py-1.5 border border-slate-300 rounded-md text-xs font-medium text-slate-900 bg-white"
-                    >
-                      <option value="operational">OPERATIONAL</option>
-                      <option value="under_maintenance">UNDER MAINTENANCE</option>
-                      <option value="out_of_service">OUT OF SERVICE</option>
-                    </select>
-                  ) : (
-                    <span
-                      className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-                        item.status === 'operational'
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : item.status === 'under_maintenance'
-                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                          : 'bg-red-50 text-red-700 border border-red-200'
-                      }`}
-                    >
-                      {item.status.replace('_', ' ').toUpperCase()}
-                    </span>
-                  )}
-                </td>
+                        <td className="px-6 py-4">
+                          {isEditing ? (
+                            <select
+                              value={editStatus}
+                              disabled={savingEdit}
+                              onChange={(e) => setEditStatus(normalizeEquipmentStatus(e.target.value))}
+                              className="px-2.5 py-1.5 border border-slate-300 rounded-md text-xs font-medium text-slate-900 bg-white"
+                            >
+                              <option value="operational">OPERATIONAL</option>
+                              <option value="under_maintenance">UNDER MAINTENANCE</option>
+                              <option value="out_of_service">OUT OF SERVICE</option>
+                            </select>
+                          ) : (
+                            <span
+                              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                currentStatus === 'operational'
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : currentStatus === 'under_maintenance'
+                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  : 'bg-red-50 text-red-700 border border-red-200'
+                              }`}
+                            >
+                              {currentStatus.replaceAll('_', ' ').toUpperCase()}
+                            </span>
+                          )}
+                        </td>
 
-                <td className="px-6 py-4 text-right whitespace-nowrap">
-                  <div className="inline-flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleViewHistory(item)}
-                      className="px-3 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md"
-                    >
-                      History
-                    </button>
+                        <td className="px-6 py-4 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleViewHistory(item)}
+                              className="px-3 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md"
+                            >
+                              History
+                            </button>
 
-                    {canEdit && (
-                      isEditing ? (
-                        <>
-                          <button
-                            type="button"
-                            disabled={savingEdit}
-                            onClick={() => handleSaveEdit(item.id)}
-                            className="px-3 py-1 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-md disabled:opacity-50"
-                          >
-                            {savingEdit ? 'Saving...' : 'Save'}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={savingEdit}
-                            onClick={cancelEditing}
-                            className="px-3 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md disabled:opacity-50"
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={editingId !== null}
-                          onClick={() => startEditing(item)}
-                          className="px-3 py-1 text-xs font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md disabled:opacity-40"
-                        >
-                          Edit
-                        </button>
-                      )
-                    )}
-                  </div>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-  )}
-</div>
+                            {canEdit && (
+                              isEditing ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={savingEdit}
+                                    onClick={() => handleSaveEdit(item.id)}
+                                    className="px-3 py-1 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-md disabled:opacity-50"
+                                  >
+                                    {savingEdit ? 'Saving...' : 'Save'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={savingEdit}
+                                    onClick={cancelEditing}
+                                    className="px-3 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md disabled:opacity-50"
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={editingId !== null}
+                                  onClick={() => startEditing(item)}
+                                  className="px-3 py-1 text-xs font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md disabled:opacity-40"
+                                >
+                                  Edit
+                                </button>
+                              )
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
-{/* Linked Maintenance History Panel */}
+        {/* Linked Maintenance History Panel */}
         {selectedHistoryAsset && (
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
