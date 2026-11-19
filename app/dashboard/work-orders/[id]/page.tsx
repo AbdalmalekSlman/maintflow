@@ -128,9 +128,15 @@ const handleLogPart = async (e: React.FormEvent) => {
   e.preventDefault()
   if (isReadOnly || isClosed || !selectedPartId) return
 
-  const qty = parseInt(quantityUsed, 10)
-  if (!qty || qty <= 0) {
-    alert('Please enter a valid quantity greater than 0.')
+  const rawQty = quantityUsed.trim()
+  if (!/^\d+$/.test(rawQty)) {
+    alert('Validation error: Quantity used must be a whole number greater than 0.')
+    return
+  }
+
+  const qty = Number(rawQty)
+  if (!Number.isInteger(qty) || qty < 1) {
+    alert('Validation error: Quantity used must be at least 1.')
     return
   }
 
@@ -323,6 +329,7 @@ const handleLogPart = async (e: React.FormEvent) => {
                   <input
   type="number"
   min="1"
+  step="1"
   max={selectedPart?.stock_quantity ?? undefined}
   required
   disabled={isClosed || submittingPart}

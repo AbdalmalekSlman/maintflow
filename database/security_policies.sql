@@ -437,3 +437,11 @@ begin
   );
 end;
 $$;
+
+
+alter table public.work_order_parts
+  drop constraint if exists work_order_parts_quantity_positive;
+
+alter table public.work_order_parts
+  add constraint work_order_parts_quantity_positive
+  check (quantity_used > 0);
