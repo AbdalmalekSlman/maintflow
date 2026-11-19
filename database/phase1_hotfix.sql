@@ -36,7 +36,6 @@ WITH CHECK (
 
 -- ============================================================
 -- 2. PREVENTIVE MAINTENANCE UPDATE POLICY
--- Team Leaders must be allowed to complete active PM schedules.
 -- ============================================================
 
 DROP POLICY IF EXISTS pm_upd ON public.pm_schedules;
@@ -45,28 +44,19 @@ CREATE POLICY pm_upd
 ON public.pm_schedules
 FOR UPDATE
 TO authenticated
-
 USING (
-  public.get_user_role() IN (
-    'admin',
-    'superintendent',
-    'team_leader'
-  )
-)
-
-WITH CHECK (
-  public.get_user_role() IN (
-    'admin',
-    'superintendent'
-  )
-  OR (
-    public.get_user_role() = 'team_leader'
-    AND status IN (
-      'pending_approval',
-      'completed',
-      'active'
+    public.get_user_role() IN ('admin', 'superintendent')
+    OR (
+        public.get_user_role() = 'team_leader'
+        AND status = 'active'
     )
-  )
+)
+WITH CHECK (
+    public.get_user_role() IN ('admin', 'superintendent')
+    OR (
+        public.get_user_role() = 'team_leader'
+        AND status = 'active'
+    )
 );
 
 
