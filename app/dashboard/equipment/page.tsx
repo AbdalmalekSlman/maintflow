@@ -115,9 +115,7 @@ useEffect(() => {
   }
 }, [fetchEquipment, router])
 
-    return () => {
-      subscription.unsubscribe()
-    }
+   
   
 
   const handleAddEquipment = async (e: React.FormEvent) => {
@@ -266,7 +264,9 @@ useEffect(() => {
     setHistoryError(null)
   }
 
-  const canEdit = Boolean(userRole && Permissions.canEditEquipment(userRole))
+  const canEdit = userRole === null
+  ? false
+  : Permissions.canEditEquipment(userRole)
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
@@ -490,12 +490,12 @@ useEffect(() => {
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-800">
-                  Maintenance History — {selectedHistoryAsset.name}
+                  Maintenance History — {selectedHistoryAsset?.name ?? ''}
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Asset Tag: <span className="font-mono">{selectedHistoryAsset.asset_tag || '—'}</span>
+                  Asset Tag: <span className="font-mono">{selectedHistoryAsset?.asset_tag || '—'}</span>
                   {' • '}
-                  Location: <span>{selectedHistoryAsset.location || '—'}</span>
+                  Location: <span>{selectedHistoryAsset?.location || '—'}</span>
                 </p>
               </div>
               <button
