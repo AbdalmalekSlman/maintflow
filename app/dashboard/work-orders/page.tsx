@@ -27,6 +27,7 @@ interface UserOption {
   full_name: string
   role: string
 }
+// Check if the current logged-in user is restricted to View-Only
 
 export default function WorkOrdersPage() {
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([])
@@ -34,7 +35,7 @@ export default function WorkOrdersPage() {
   const [usersList, setUsersList] = useState<UserOption[]>([])
   const [loading, setLoading] = useState(true)
   const [userRole, setUserRole] = useState<PlantRole | null>(null)
-
+const isReadOnly = userRole === 'manager'
   // Form state
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -299,7 +300,13 @@ export default function WorkOrdersPage() {
                     }`}>
                       {wo.status.replace(/_/g, ' ').toUpperCase()}
                     </span>
-
+                     {isReadOnly ? (
+  /* Read-only badge for Managers */
+  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 capitalize">
+    {wo.status.replace('_', ' ')}
+  </span>
+) : (
+  /* Interactive dropdown for operational roles */
                     <select
                       value={wo.status}
                       onChange={(e) => updateStatus(wo.id, e.target.value as any)}
@@ -310,6 +317,7 @@ export default function WorkOrdersPage() {
                       <option value="completed_pending_review">Pending Review</option>
                       <option value="verified_closed">Verified Closed</option>
                     </select>
+                    )}
                   </div>
                 </div>
               ))}
