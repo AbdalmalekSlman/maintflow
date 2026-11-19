@@ -49,7 +49,7 @@ const [historyError, setHistoryError] = useState<string | null>(null)
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
-        router.push('/login')
+        router.replace('/')
         return
       }
 
@@ -85,6 +85,17 @@ const [historyError, setHistoryError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchEquipment()
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        router.replace('/')
+      }
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
   }, [router])
 
   const handleAddEquipment = async (e: React.FormEvent) => {

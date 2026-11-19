@@ -42,7 +42,7 @@ export default function AnalyticsPage() {
         } = await supabase.auth.getUser()
 
         if (!user) {
-          router.replace('/login')
+          router.replace('/')
           return
         }
 
