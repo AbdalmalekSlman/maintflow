@@ -190,3 +190,10 @@ with check (
     and assigned_to = auth.uid()
   )
 );
+
+alter table public.work_orders
+  drop constraint if exists work_orders_title_not_blank;
+
+alter table public.work_orders
+  add constraint work_orders_title_not_blank
+  check (char_length(btrim(title)) > 0);

@@ -121,6 +121,13 @@ export default function WorkOrdersPage() {
   }, [isShiftTech, currentUserId])
 
   const handleCreateWorkOrder = async (e: React.FormEvent) => {
+    const trimmedTitle = title.trim()
+
+if (!trimmedTitle) {
+  alert('Please enter a valid work order title.')
+  setSubmitting(false)
+  return
+}
     e.preventDefault()
     setSubmitting(true)
 
