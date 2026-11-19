@@ -23,7 +23,48 @@ interface EquipmentOption {
 }
 
 type PMFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'
+const calculateNextDueDate = (currentDueDate: string, frequency: string): string => {
+  const normalizedFreq = frequency.trim().toLowerCase()
+  const base = /^\d{4}-\d{2}-\d{2}$/.test(currentDueDate)
+    ? new Date(`${currentDueDate}T00:00:00Z`)
+    : new Date()
 
+  const year = base.getUTCFullYear()
+  const month = base.getUTCMonth()
+  const day = base.getUTCDate()
+
+  let next: Date
+
+  switch (normalizedFreq) {
+    case 'daily':
+      next = new Date(Date.UTC(year, month, day + 1))
+      break
+    case 'weekly':
+      next = new Date(Date.UTC(year, month, day + 7))
+      break
+    case 'quarterly': {
+      const targetMonth = month + 3
+      const lastDay = new Date(Date.UTC(year, targetMonth + 1, 0)).getUTCDate()
+      next = new Date(Date.UTC(year, targetMonth, Math.min(day, lastDay)))
+      break
+    }
+    case 'yearly': {
+      const targetYear = year + 1
+      const lastDay = new Date(Date.UTC(targetYear, month + 1, 0)).getUTCDate()
+      next = new Date(Date.UTC(targetYear, month, Math.min(day, lastDay)))
+      break
+    }
+    case 'monthly':
+    default: {
+      const targetMonth = month + 1
+      const lastDay = new Date(Date.UTC(year, targetMonth + 1, 0)).getUTCDate()
+      next = new Date(Date.UTC(year, targetMonth, Math.min(day, lastDay)))
+      break
+    }
+  }
+
+  return next.toISOString().slice(0, 10)
+}
 const ROLES_ALLOWED_TO_COMPLETE_PM: PlantRole[] = [
   'admin',
   'superintendent',
@@ -149,7 +190,7 @@ export default function PreventiveMaintenancePage() {
     }
   }
 
-  const handleCompletePM = async (scheduleId: string) => {
+  const handleCompletePM = async (schedule: PMSchedule) => {
     setActionMessage(null)
 
     if (!canCompletePM) {
@@ -160,16 +201,21 @@ export default function PreventiveMaintenancePage() {
       return
     }
 
+    const rolledDueDate = calculateNextDueDate(schedule.next_due_date, schedule.frequency)
+
     const { data, error } = await supabase
       .from('pm_schedules')
-      .update({ status: 'completed' })
-      .eq('id', scheduleId)
+      .update({
+        next_due_date: rolledDueDate,
+        status: 'active',
+      })
+      .eq('id', schedule.id)
       .select('id')
 
     if (error) {
       setActionMessage({
         type: 'error',
-        text: `Unable to mark PM completed: ${error.message}`,
+        text: `Unable to complete PM schedule: ${error.message}`,
       })
       return
     }
@@ -184,7 +230,7 @@ export default function PreventiveMaintenancePage() {
 
     setActionMessage({
       type: 'success',
-      text: 'PM schedule marked as completed.',
+      text: `PM cycle completed. Next due date rolled forward to ${rolledDueDate}.`,
     })
     await fetchData()
   }
@@ -360,13 +406,13 @@ export default function PreventiveMaintenancePage() {
 
                         {/* Execution Button - Only for roles authorized to complete PMs */}
                         {canCompletePM && pm.status === 'active' && (
-                          <button
-                            onClick={() => handleCompletePM(pm.id)}
-                            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-medium transition"
-                          >
-                            Mark Completed
-                          </button>
-                        )}
+  <button
+    onClick={() => handleCompletePM(pm)}
+    className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-medium transition"
+  >
+    Mark Completed
+  </button>
+)}
                       </td>
                     </tr>
                   ))}
