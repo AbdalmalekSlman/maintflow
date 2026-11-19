@@ -51,7 +51,8 @@ export default function WorkOrdersPage() {
   // Derived role flags
   const isReadOnly = userRole === 'manager' || userRole === 'stock_keeper'
   const isShiftTech = userRole === 'shift_technician'
-
+const canVerifyClose =
+  userRole === 'admin' || userRole === 'superintendent' || userRole === 'team_leader'
   const fetchData = async () => {
     setLoading(true)
 
@@ -121,15 +122,15 @@ export default function WorkOrdersPage() {
   }, [isShiftTech, currentUserId])
 
   const handleCreateWorkOrder = async (e: React.FormEvent) => {
-    const trimmedTitle = title.trim()
-
-if (!trimmedTitle) {
-  alert('Please enter a valid work order title.')
-  setSubmitting(false)
-  return
-}
     e.preventDefault()
     setSubmitting(true)
+
+    const trimmedTitle = title.trim()
+    if (!trimmedTitle) {
+      alert('Please enter a valid work order title.')
+      setSubmitting(false)
+      return
+    }
 
     const {
       data: { user },
@@ -146,8 +147,8 @@ if (!trimmedTitle) {
 
     const { error } = await supabase.from('work_orders').insert([
       {
-        title,
-        description,
+        title: trimmedTitle,
+        description: description.trim() || null,
         priority,
         equipment_id: equipmentId || null,
         team_leader_id: teamLeaderId || null,
@@ -179,9 +180,13 @@ if (!trimmedTitle) {
       .update({ status: newStatus })
       .eq('id', id)
 
-    if (!error) {
+    if (error) {
+      alert(`Unable to update status: ${error.message}`)
       await fetchData()
+      return
     }
+
+    await fetchData()
   }
 
   const teamLeaders = usersList.filter((u) => u.role === 'team_leader')
@@ -409,7 +414,9 @@ if (!trimmedTitle) {
                         <option value="assigned">Assigned</option>
                         <option value="in_progress">In Progress</option>
                         <option value="completed_pending_review">Pending Review</option>
-                        <option value="verified_closed">Verified Closed</option>
+                        <option value="verified_closed" disabled={!canVerifyClose}>
+  Verified Closed
+</option>
                       </select>
                     )}
                   </div>
