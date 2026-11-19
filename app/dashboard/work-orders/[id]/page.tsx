@@ -44,6 +44,7 @@ export default function WorkOrderDetailPage({ params }: { params: Promise<{ id: 
   const [submittingPart, setSubmittingPart] = useState(false)
   const [savingOutcome, setSavingOutcome] = useState(false)
   const [userRole, setUserRole] = useState<PlantRole | null>(null)
+  const [notFound, setNotFound] = useState(false)
   const router = useRouter()
 
   const isClosed = workOrder?.status === 'verified_closed'
@@ -73,19 +74,18 @@ const selectedPart = inventoryList.find((p) => p.id === selectedPartId)
 
     // Fetch Work Order with team_leader and assignee relations
     const { data: woData, error: woError } = await supabase
-      .from('work_orders')
-      .select(
-        'id, title, description, priority, status, outcome_notes, equipment:equipment_id(name, serial_number, location), team_leader:team_leader_id(full_name), assignee:assigned_to(full_name)'
-      )
-      .eq('id', workOrderId)
-      .single()
+  .from('work_orders')
+  .select(
+    'id, title, description, priority, status, outcome_notes, equipment:equipment_id(name, serial_number, location), team_leader:team_leader_id(full_name), assignee:assigned_to(full_name)'
+  )
+  .eq('id', workOrderId)
+  .single()
 
-    if (woError) {
-      alert('Supabase Error: ' + woError.message)
-      router.replace('/dashboard/work-orders')
-      return
-    }
-
+if (woError || !woData) {
+  setNotFound(true)
+  setLoading(false)
+  return
+}
     if (!woData) {
       alert('Work order not found in database.')
       router.replace('/dashboard/work-orders')
@@ -207,7 +207,28 @@ const handleLogPart = async (e: React.FormEvent) => {
       </div>
     )
   }
-
+if (notFound) {
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+      <div className="max-w-md w-full bg-white p-8 rounded-xl border border-slate-200 shadow-sm text-center space-y-4">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+          404 • Not Found
+        </p>
+        <h1 className="text-xl font-bold text-slate-900">Work Order Unavailable</h1>
+        <p className="text-sm text-slate-600">
+          This work order does not exist or is not assigned to your account.
+        </p>
+        <button
+          type="button"
+          onClick={() => router.push('/dashboard/work-orders')}
+          className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition"
+        >
+          ← Back to Work Orders
+        </button>
+      </div>
+    </div>
+  )
+}
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-4xl mx-auto space-y-6">
