@@ -8,7 +8,7 @@ import { Permissions, PlantRole } from '@/lib/permissions'
 interface EquipmentItem {
   id: string
   name: string
-  serial_number: string
+  asset_tag: string
   location: string
   status: 'operational' | 'under_maintenance' | 'out_of_service'
 }
@@ -73,7 +73,7 @@ export default function EquipmentPage() {
     const { error } = await supabase.from('equipment').insert([
       {
         name,
-        serial_number: serialNumber,
+        asset_tag: serialNumber,
         location,
         status: 'operational',
       },
@@ -181,7 +181,7 @@ export default function EquipmentPage() {
                   {equipment.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50">
                       <td className="px-6 py-4 font-medium text-slate-900">{item.name}</td>
-                      <td className="px-6 py-4 font-mono text-xs text-slate-600">{item.serial_number}</td>
+                      <td className="px-6 py-4 font-mono text-xs text-slate-600">{item.asset_tag}</td>
                       <td className="px-6 py-4">{item.location}</td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${

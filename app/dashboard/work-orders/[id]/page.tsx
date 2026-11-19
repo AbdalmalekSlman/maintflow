@@ -12,7 +12,7 @@ interface WorkOrder {
   priority: string
   status: string
   outcome_notes: string
-  equipment?: { name: string; serial_number: string; location: string }
+  equipment?: { name: string; asset_tag: string; location: string }
   team_leader?: { full_name: string }
   assignee?: { full_name: string }
 }
@@ -78,7 +78,7 @@ const selectedPart = inventoryList.find((p) => p.id === selectedPartId)
     const { data: woData, error: woError } = await supabase
   .from('work_orders')
   .select(
-    'id, title, description, priority, status, outcome_notes, equipment:equipment_id(name, serial_number, location), team_leader:team_leader_id(full_name), assignee:assigned_to(full_name)'
+    'id, title, description, priority, status, outcome_notes, equipment:equipment_id(name, asset_tag, location), team_leader:team_leader_id(full_name), assignee:assigned_to(full_name)'
   )
   .eq('id', workOrderId)
   .single()
@@ -305,7 +305,7 @@ if (notFound) {
               <p className="text-sm font-semibold text-slate-900">
                 {workOrder.equipment.name}{' '}
                 <span className="font-mono text-xs text-slate-500">
-                  ({workOrder.equipment.serial_number})
+                  ({workOrder.equipment.asset_tag})
                 </span>
               </p>
               <p className="text-xs text-slate-600">Location: {workOrder.equipment.location}</p>
