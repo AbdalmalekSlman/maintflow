@@ -241,3 +241,45 @@ create trigger trg_enforce_work_order_status
 before insert or update on public.work_orders
 for each row
 execute function public.enforce_work_order_status_rules();
+
+
+
+create or replace function public.enforce_work_order_status_rules()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  actor_role text;
+begin
+  select role into actor_role
+  from public.users
+  where id = auth.uid();
+
+  if tg_op = 'INSERT' then
+    if new.status is distinct from 'assigned' then
+      raise exception 'New work orders must be created with status ''assigned''';
+    end if;
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if old.status = 'verified_closed'
+       and new.status is distinct from 'verified_closed'
+       and coalesce(actor_role, '') not in ('admin', 'superintendent') then
+      raise exception 'Verified closed work orders cannot be reopened by role ''%''', coalesce(actor_role, 'unknown');
+    end if;
+
+    if new.status = 'verified_closed'
+       and old.status is distinct from 'verified_closed'
+       and coalesce(actor_role, '') not in ('admin', 'superintendent', 'team_leader') then
+      raise exception 'Role ''%'' is not permitted to set status to ''verified_closed''', coalesce(actor_role, 'unknown');
+    end if;
+
+    return new;
+  end if;
+
+  return new;
+end;
+$$;
