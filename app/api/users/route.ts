@@ -42,3 +42,197 @@ export async function POST(request: Request) {
   }
   return NextResponse.json({ success: true, userId: data.user.id })
 }
+
+
+export async function DELETE(request: Request) {
+  try {
+    // 1. Authenticate current user
+    const supabase = await createClient()
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
+    // 2. Verify Admin role
+    const { data: me, error: roleError } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+
+    if (roleError || me?.role !== 'admin') {
+      return NextResponse.json(
+        { error: 'Forbidden: Admin access required' },
+        { status: 403 }
+      )
+    }
+
+    // 3. Validate target user ID
+    const targetUserId = new URL(request.url)
+      .searchParams.get('userId')
+
+    const uuidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+    if (!targetUserId || !uuidPattern.test(targetUserId)) {
+      return NextResponse.json(
+        { error: 'Valid user ID is required' },
+        { status: 400 }
+      )
+    }
+
+    // 4. Prevent deleting yourself
+    if (targetUserId === user.id) {
+      return NextResponse.json(
+        { error: 'You cannot delete your own Admin account' },
+        { status: 400 }
+      )
+    }
+
+    // 5. Find target user
+    const { data: target, error: targetError } = await supabase
+      .from('users')
+      .select('id, full_name, role')
+      .eq('id', targetUserId)
+      .maybeSingle()
+
+    if (targetError) {
+      return NextResponse.json(
+        { error: targetError.message },
+        { status: 500 }
+      )
+    }
+
+    if (!target) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      )
+    }
+
+    // 6. Prevent deleting the last Admin
+    if (target.role === 'admin') {
+      const { count, error: countError } = await supabase
+        .from('users')
+        .select('id', { count: 'exact', head: true })
+        .eq('role', 'admin')
+
+      if (countError) {
+        return NextResponse.json(
+          { error: 'Unable to verify Admin accounts' },
+          { status: 500 }
+        )
+      }
+
+      if ((count ?? 0) <= 1) {
+        return NextResponse.json(
+          { error: 'Cannot delete the last Admin account' },
+          { status: 409 }
+        )
+      }
+    }
+
+    // 7. Prevent orphaning active maintenance assignments
+    const { count: assignedCount, error: assignedError } =
+      await supabase
+        .from('work_orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('assigned_to', targetUserId)
+        .neq('status', 'verified_closed')
+
+    if (assignedError) {
+      return NextResponse.json(
+        { error: 'Unable to check assigned work orders' },
+        { status: 500 }
+      )
+    }
+
+    const { count: leaderCount, error: leaderError } =
+      await supabase
+        .from('work_orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('team_leader_id', targetUserId)
+        .neq('status', 'verified_closed')
+
+    if (leaderError) {
+      return NextResponse.json(
+        { error: 'Unable to check Team Leader assignments' },
+        { status: 500 }
+      )
+    }
+
+    if ((assignedCount ?? 0) > 0 || (leaderCount ?? 0) > 0) {
+      return NextResponse.json(
+        {
+          error:
+            'This user has active work orders. Reassign or close them before deleting the account.',
+          assignedWorkOrders: assignedCount ?? 0,
+          ledWorkOrders: leaderCount ?? 0,
+        },
+        { status: 409 }
+      )
+    }
+
+    // 8. Initialize Supabase Admin client
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+    if (!serviceKey) {
+      return NextResponse.json(
+        { error: 'Server configuration error' },
+        { status: 500 }
+      )
+    }
+
+    const admin = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      serviceKey,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      }
+    )
+
+    // 9. Delete Supabase Auth account
+    // public.users is deleted through its existing
+    // ON DELETE CASCADE foreign key.
+    const { error: deleteError } =
+      await admin.auth.admin.deleteUser(targetUserId)
+
+    if (deleteError) {
+      const message = deleteError.message
+
+      return NextResponse.json(
+        { error: message },
+        {
+          status: message.toLowerCase().includes('last admin')
+            ? 409
+            : 400,
+        }
+      )
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `${target.full_name || 'User'} was successfully deleted`,
+      userId: targetUserId,
+    })
+
+  } catch (error) {
+    console.error('User deletion error:', error)
+
+    return NextResponse.json(
+      { error: 'Unexpected error while deleting user' },
+      { status: 500 }
+    )
+  }
+}

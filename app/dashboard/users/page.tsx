@@ -16,6 +16,7 @@ export default function UserManagementPage() {
   const [users, setUsers] = useState<UserProfile[]>([])
   const [loading, setLoading] = useState(true)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   // New user form state
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
@@ -108,6 +109,61 @@ export default function UserManagementPage() {
     setUpdatingId(null)
   }
 
+
+const handleDeleteUser = async (target: UserProfile) => {
+  if (!userRole || !Permissions.canManageUsers(userRole)) {
+    return
+  }
+
+  if (target.id === currentUserId) {
+    alert('You cannot delete your own account.')
+    return
+  }
+
+  const confirmed = window.confirm(
+    `Are you sure you want to permanently delete ${target.full_name}?\n\n` +
+    'Their login account and profile will be deleted. ' +
+    'Historical maintenance records will be preserved. ' +
+    'Any active work orders must be reassigned first.'
+  )
+
+  if (!confirmed) return
+
+  setDeletingId(target.id)
+
+  try {
+    const response = await fetch(
+      `/api/users?userId=${encodeURIComponent(target.id)}`,
+      {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      }
+    )
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      alert('Unable to delete user: ' + (data.error || 'Unknown error'))
+      return
+    }
+
+    alert(data.message || 'User deleted successfully.')
+
+    await fetchUsers()
+
+  } catch (error: unknown) {
+    const message = error instanceof Error
+      ? error.message
+      : 'Unexpected deletion error.'
+
+    alert('Error deleting user: ' + message)
+
+  } finally {
+    setDeletingId(null)
+  }
+}
+
+
   const formatRoleLabel = (r: PlantRole) => {
     switch (r) {
       case 'admin': return 'Admin'
@@ -172,7 +228,7 @@ export default function UserManagementPage() {
               <input
                 type="password"
                 required
-                minLength={6}
+                minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
@@ -224,7 +280,7 @@ export default function UserManagementPage() {
                     <th className="px-6 py-3 font-medium">Full Name</th>
                     <th className="px-6 py-3 font-medium">User ID</th>
                     <th className="px-6 py-3 font-medium">Assigned Role</th>
-                    <th className="px-6 py-3 font-medium text-right">Update Role</th>
+                    <th className="px-6 py-3 font-medium text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 text-slate-700">
@@ -245,24 +301,47 @@ export default function UserManagementPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        {Permissions.canManageUsers(userRole) && u.id !== currentUserId ? (
-                        <select
-                          value={u.role || 'technician'}
-                          disabled={updatingId === u.id}
-                          onChange={(e) => handleRoleChange(u.id, e.target.value as PlantRole)}
-                          className="px-3 py-1 text-xs font-medium bg-white border border-slate-300 rounded-lg text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-600 disabled:opacity-50"
-                        >
-                          <option value="admin">Admin</option>
-                          <option value="manager">Manager</option>
-                          <option value="superintendent">Superintendent</option>
-                          <option value="team_leader">Team Leader</option>
-                          <option value="technician">Technician</option>
-                          <option value="shift_technician">Shift Technician</option>
-                          <option value="stock_keeper">Stock Keeper</option>
-                        </select>
-                        ) : (
-    <span className="text-xs text-slate-400">{u.id === currentUserId ? 'You' : 'View only'}</span>
-  )}
+                    
+{Permissions.canManageUsers(userRole) && u.id !== currentUserId ? (
+  <div className="flex items-center justify-end gap-2">
+    <select
+      value={u.role || 'technician'}
+      disabled={
+        updatingId === u.id ||
+        deletingId === u.id
+      }
+      onChange={(e) =>
+        handleRoleChange(u.id, e.target.value as PlantRole)
+      }
+      className="px-3 py-1 text-xs font-medium bg-white border border-slate-300 rounded-lg text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-600 disabled:opacity-50"
+    >
+      <option value="admin">Admin</option>
+      <option value="manager">Manager</option>
+      <option value="superintendent">Superintendent</option>
+      <option value="team_leader">Team Leader</option>
+      <option value="technician">Technician</option>
+      <option value="shift_technician">Shift Technician</option>
+      <option value="stock_keeper">Stock Keeper</option>
+    </select>
+
+    <button
+      type="button"
+      onClick={() => void handleDeleteUser(u)}
+      disabled={
+        deletingId === u.id ||
+        updatingId === u.id
+      }
+      className="px-3 py-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50"
+    >
+      {deletingId === u.id ? 'Deleting...' : 'Delete'}
+    </button>
+  </div>
+) : (
+  <span className="text-xs text-slate-400">
+    {u.id === currentUserId ? 'You' : 'View only'}
+  </span>
+)}
+
                       </td>
                     </tr>
                   ))}
