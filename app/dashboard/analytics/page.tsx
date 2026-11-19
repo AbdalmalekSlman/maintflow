@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+const ALLOWED_ANALYTICS_ROLES = ['admin', 'manager', 'superintendent', 'team_leader']
+
 interface AnalyticsMetrics {
   totalWorkOrders: number
   completedWorkOrders: number
@@ -16,6 +18,10 @@ interface AnalyticsMetrics {
 }
 
 export default function AnalyticsPage() {
+  const router = useRouter()
+  const [authorized, setAuthorized] = useState(false)
+  const [checkingRole, setCheckingRole] = useState(true)
+
   const [metrics, setMetrics] = useState<AnalyticsMetrics>({
     totalWorkOrders: 0,
     completedWorkOrders: 0,
@@ -27,59 +33,103 @@ export default function AnalyticsPage() {
     lowStockParts: 0,
   })
   const [loading, setLoading] = useState(true)
-  const router = useRouter()
 
   useEffect(() => {
-    const fetchAnalytics = async () => {
-      // Fetch all core metrics in parallel
-      const [
-        { data: woData },
-        { data: eqData },
-        { data: invData }
-      ] = await Promise.all([
-        supabase.from('work_orders').select('status'),
-        supabase.from('equipment').select('status'),
-        supabase.from('inventory').select('stock_quantity, min_threshold')
-      ])
+    const initAnalytics = async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
 
-      const totalWorkOrders = woData?.length || 0
-      const completedWorkOrders = woData?.filter(w => w.status === 'verified_closed' || w.status === 'completed_pending_review').length || 0
-      const inProgressWorkOrders = woData?.filter(w => w.status === 'in_progress').length || 0
+        if (!user) {
+          router.replace('/login')
+          return
+        }
 
-      const totalEquipment = eqData?.length || 0
-      const operationalEquipment = eqData?.filter(e => e.status === 'operational').length || 0
-      const downEquipment = totalEquipment - operationalEquipment
+        const { data: profile } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', user.id)
+          .single()
 
-      const totalParts = invData?.length || 0
-      const lowStockParts = invData?.filter(i => i.stock_quantity <= i.min_threshold).length || 0
+        if (!profile?.role || !ALLOWED_ANALYTICS_ROLES.includes(profile.role)) {
+          router.replace('/dashboard')
+          return
+        }
 
-      setMetrics({
-        totalWorkOrders,
-        completedWorkOrders,
-        inProgressWorkOrders,
-        totalEquipment,
-        operationalEquipment,
-        downEquipment,
-        totalParts,
-        lowStockParts,
-      })
-      setLoading(false)
+        setAuthorized(true)
+        setCheckingRole(false)
+
+        const [
+          { data: woData },
+          { data: eqData },
+          { data: invData },
+        ] = await Promise.all([
+          supabase.from('work_orders').select('status'),
+          supabase.from('equipment').select('status'),
+          supabase.from('inventory').select('stock_quantity, min_threshold'),
+        ])
+
+        const totalWorkOrders = woData?.length || 0
+        const completedWorkOrders =
+          woData?.filter(
+            (w) => w.status === 'verified_closed' || w.status === 'completed_pending_review'
+          ).length || 0
+        const inProgressWorkOrders =
+          woData?.filter((w) => w.status === 'in_progress').length || 0
+
+        const totalEquipment = eqData?.length || 0
+        const operationalEquipment =
+          eqData?.filter((e) => e.status === 'operational').length || 0
+        const downEquipment = totalEquipment - operationalEquipment
+
+        const totalParts = invData?.length || 0
+        const lowStockParts =
+          invData?.filter((i) => i.stock_quantity <= i.min_threshold).length || 0
+
+        setMetrics({
+          totalWorkOrders,
+          completedWorkOrders,
+          inProgressWorkOrders,
+          totalEquipment,
+          operationalEquipment,
+          downEquipment,
+          totalParts,
+          lowStockParts,
+        })
+      } finally {
+        setLoading(false)
+      }
     }
 
-    fetchAnalytics()
-  }, [])
+    initAnalytics()
+  }, [router])
 
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-slate-600">Loading plant analytics...</div>
+  if (checkingRole || !authorized) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-slate-600">
+        Checking permissions...
+      </div>
+    )
   }
 
-  const equipmentUptimePct = metrics.totalEquipment > 0 
-    ? Math.round((metrics.operationalEquipment / metrics.totalEquipment) * 100) 
-    : 100
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-slate-600">
+        Loading plant analytics...
+      </div>
+    )
+  }
 
-  const workOrderCompletionRate = metrics.totalWorkOrders > 0
-    ? Math.round((metrics.completedWorkOrders / metrics.totalWorkOrders) * 100)
-    : 0
+  const equipmentUptimePct =
+    metrics.totalEquipment > 0
+      ? Math.round((metrics.operationalEquipment / metrics.totalEquipment) * 100)
+      : 100
+
+  const workOrderCompletionRate =
+    metrics.totalWorkOrders > 0
+      ? Math.round((metrics.completedWorkOrders / metrics.totalWorkOrders) * 100)
+      : 0
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
