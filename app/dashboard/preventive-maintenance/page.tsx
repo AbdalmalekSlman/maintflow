@@ -23,6 +23,27 @@ interface EquipmentOption {
 }
 
 type PMFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'
+
+const ROLES_ALLOWED_TO_COMPLETE_PM: PlantRole[] = [
+  'admin',
+  'superintendent',
+  'team_leader',
+]
+
+const normalizePMFrequency = (value: string): PMFrequency => {
+  const lower = value.trim().toLowerCase()
+  if (
+    lower === 'daily' ||
+    lower === 'weekly' ||
+    lower === 'monthly' ||
+    lower === 'quarterly' ||
+    lower === 'yearly'
+  ) {
+    return lower
+  }
+  return 'monthly'
+}
+
 const calculateNextDueDate = (currentDueDate: string, frequency: string): string => {
   const normalizedFreq = frequency.trim().toLowerCase()
   const base = /^\d{4}-\d{2}-\d{2}$/.test(currentDueDate)
@@ -65,11 +86,6 @@ const calculateNextDueDate = (currentDueDate: string, frequency: string): string
 
   return next.toISOString().slice(0, 10)
 }
-const ROLES_ALLOWED_TO_COMPLETE_PM: PlantRole[] = [
-  'admin',
-  'superintendent',
-  'team_leader',
-]
 
 export default function PreventiveMaintenancePage() {
   const [userRole, setUserRole] = useState<PlantRole | null>(null)
@@ -78,16 +94,24 @@ export default function PreventiveMaintenancePage() {
   const [loading, setLoading] = useState(true)
   const [actionMessage, setActionMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null)
 
-  // Form state
+  // Create Form state
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [equipmentId, setEquipmentId] = useState('')
   const [nextDueDate, setNextDueDate] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [frequency, setFrequency] = useState<PMFrequency>('monthly')
+
+  // Inline Edit state (PM-06)
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null)
+  const [editFrequency, setEditFrequency] = useState<PMFrequency>('monthly')
+  const [editNextDueDate, setEditNextDueDate] = useState('')
+  const [savingScheduleEdit, setSavingScheduleEdit] = useState(false)
+
   const router = useRouter()
 
   const canCompletePM = Boolean(userRole && ROLES_ALLOWED_TO_COMPLETE_PM.includes(userRole))
+  const canEditScheduleInterval = userRole === 'superintendent' || userRole === 'admin'
 
   const fetchData = async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -139,7 +163,6 @@ export default function PreventiveMaintenancePage() {
     setSubmitting(true)
     setActionMessage(null)
 
-    // Superintendents and Admins create pre-approved schedules; Team Leaders submit for approval
     const initialStatus = userRole === 'team_leader' ? 'pending_approval' : 'active'
 
     const { error } = await supabase
@@ -233,6 +256,77 @@ export default function PreventiveMaintenancePage() {
       text: `PM cycle completed. Next due date rolled forward to ${rolledDueDate}.`,
     })
     await fetchData()
+  }
+
+  const startEditingSchedule = (pm: PMSchedule) => {
+    setActionMessage(null)
+    setEditingScheduleId(pm.id)
+    setEditFrequency(normalizePMFrequency(pm.frequency))
+    setEditNextDueDate(pm.next_due_date)
+  }
+
+  const cancelEditingSchedule = () => {
+    setEditingScheduleId(null)
+    setEditFrequency('monthly')
+    setEditNextDueDate('')
+  }
+
+  const handleSaveScheduleEdit = async (scheduleId: string) => {
+    setActionMessage(null)
+
+    if (!canEditScheduleInterval) {
+      setActionMessage({
+        type: 'error',
+        text: `Permission denied: role "${userRole || 'unknown'}" cannot edit PM intervals.`,
+      })
+      return
+    }
+
+    if (!editNextDueDate) {
+      setActionMessage({
+        type: 'error',
+        text: 'Please select a valid due date.',
+      })
+      return
+    }
+
+    setSavingScheduleEdit(true)
+
+    try {
+      const { data, error } = await supabase
+        .from('pm_schedules')
+        .update({
+          frequency: editFrequency,
+          next_due_date: editNextDueDate,
+        })
+        .eq('id', scheduleId)
+        .select('id')
+
+      if (error) {
+        setActionMessage({
+          type: 'error',
+          text: `Error updating PM interval: ${error.message}`,
+        })
+        return
+      }
+
+      if (!data || data.length === 0) {
+        setActionMessage({
+          type: 'error',
+          text: 'Permission denied or PM schedule no longer available (0 rows updated).',
+        })
+        return
+      }
+
+      cancelEditingSchedule()
+      setActionMessage({
+        type: 'success',
+        text: 'PM schedule interval updated.',
+      })
+      await fetchData()
+    } finally {
+      setSavingScheduleEdit(false)
+    }
   }
 
   return (
@@ -375,47 +469,123 @@ export default function PreventiveMaintenancePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 text-slate-700">
-                  {schedules.map((pm) => (
-                    <tr key={pm.id} className="hover:bg-slate-50">
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-slate-900">{pm.title}</div>
-                        <div className="text-xs text-slate-500">{pm.description}</div>
-                      </td>
-                      <td className="px-6 py-4">{pm.equipment?.name || 'General Plant'}</td>
-                      <td className="px-6 py-4">{pm.frequency}</td>
-                      <td className="px-6 py-4">{pm.next_due_date}</td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${
-                          pm.status === 'active' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                          pm.status === 'pending_approval' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
-                          'bg-slate-100 text-slate-700 border border-slate-200'
-                        }`}>
-                          {pm.status.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right space-x-2">
-                        {/* Superintendent & Admin Approval Button */}
-                        {(userRole === 'superintendent' || userRole === 'admin') && pm.status === 'pending_approval' && (
-                          <button
-                            onClick={() => handleApprovePM(pm.id)}
-                            className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-medium transition"
-                          >
-                            Approve
-                          </button>
-                        )}
+                  {schedules.map((pm) => {
+                    const isEditing = editingScheduleId === pm.id
 
-                        {/* Execution Button - Only for roles authorized to complete PMs */}
-                        {canCompletePM && pm.status === 'active' && (
-  <button
-    onClick={() => handleCompletePM(pm)}
-    className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-medium transition"
-  >
-    Mark Completed
-  </button>
-)}
-                      </td>
-                    </tr>
-                  ))}
+                    return (
+                      <tr key={pm.id} className="hover:bg-slate-50">
+                        <td className="px-6 py-4">
+                          <div className="font-medium text-slate-900">{pm.title}</div>
+                          <div className="text-xs text-slate-500">{pm.description}</div>
+                        </td>
+                        <td className="px-6 py-4">{pm.equipment?.name || 'General Plant'}</td>
+                        <td className="px-6 py-4 capitalize">
+                          {isEditing ? (
+                            <select
+                              value={editFrequency}
+                              disabled={savingScheduleEdit}
+                              onChange={(e) => setEditFrequency(e.target.value as PMFrequency)}
+                              className="px-2.5 py-1 border border-slate-300 rounded-md text-xs font-medium text-slate-900 bg-white"
+                            >
+                              <option value="daily">Daily</option>
+                              <option value="weekly">Weekly</option>
+                              <option value="monthly">Monthly</option>
+                              <option value="quarterly">Quarterly</option>
+                              <option value="yearly">Yearly</option>
+                            </select>
+                          ) : (
+                            pm.frequency
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          {isEditing ? (
+                            <input
+                              type="date"
+                              value={editNextDueDate}
+                              disabled={savingScheduleEdit}
+                              onChange={(e) => setEditNextDueDate(e.target.value)}
+                              className="px-2.5 py-1 border border-slate-300 rounded-md text-xs text-slate-900 bg-white"
+                            />
+                          ) : (
+                            pm.next_due_date
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${
+                              pm.status === 'active'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : pm.status === 'pending_approval'
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : 'bg-slate-100 text-slate-700 border border-slate-200'
+                            }`}
+                          >
+                            {pm.status.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-2">
+                            {isEditing ? (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={savingScheduleEdit}
+                                  onClick={() => handleSaveScheduleEdit(pm.id)}
+                                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition disabled:opacity-50"
+                                >
+                                  {savingScheduleEdit ? 'Saving...' : 'Save'}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={savingScheduleEdit}
+                                  onClick={cancelEditingSchedule}
+                                  className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-medium transition disabled:opacity-50"
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                {/* Superintendent & Admin Approval Button */}
+                                {canEditScheduleInterval && pm.status === 'pending_approval' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApprovePM(pm.id)}
+                                    className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-medium transition"
+                                  >
+                                    Approve
+                                  </button>
+                                )}
+
+                                {/* Superintendent & Admin Edit Interval Button (PM-06) */}
+                                {canEditScheduleInterval && (
+                                  <button
+                                    type="button"
+                                    disabled={editingScheduleId !== null}
+                                    onClick={() => startEditingSchedule(pm)}
+                                    className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-medium transition disabled:opacity-40"
+                                  >
+                                    Edit Interval
+                                  </button>
+                                )}
+
+                                {/* Execution Button - Only for roles authorized to complete PMs */}
+                                {canCompletePM && pm.status === 'active' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCompletePM(pm)}
+                                    className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-medium transition"
+                                  >
+                                    Mark Completed
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
