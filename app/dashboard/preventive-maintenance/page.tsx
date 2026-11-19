@@ -27,15 +27,15 @@ export default function PreventiveMaintenancePage() {
   const [schedules, setSchedules] = useState<PMSchedule[]>([])
   const [equipmentList, setEquipmentList] = useState<EquipmentOption[]>([])
   const [loading, setLoading] = useState(true)
-
+  
   // Form state
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [equipmentId, setEquipmentId] = useState('')
-  const [frequency, setFrequency] = useState('Monthly')
+  
   const [nextDueDate, setNextDueDate] = useState('')
   const [submitting, setSubmitting] = useState(false)
-
+  const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'>('monthly')
   const router = useRouter()
 
   const fetchData = async () => {
@@ -83,7 +83,7 @@ export default function PreventiveMaintenancePage() {
     fetchData()
   }, [router])
 
-  const handleCreatePM = async (e: React.FormEvent) => {
+ const handleCreatePM = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
 
@@ -109,7 +109,7 @@ export default function PreventiveMaintenancePage() {
       setTitle('')
       setDescription('')
       setEquipmentId('')
-      setFrequency('Monthly')
+      setFrequency('monthly')
       setNextDueDate('')
       fetchData()
     }
@@ -197,16 +197,17 @@ export default function PreventiveMaintenancePage() {
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Frequency</label>
                 <select
-                  value={frequency}
-                  onChange={(e) => setFrequency(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
-                >
-                  <option value="daily">daily</option>
-                  <option value="weekly">weekly</option>
-                  <option value="monthly">monthly</option>
-                  <option value="quarterly">quarterly</option>
-                  <option value="yearly">yearly</option>
-                </select>
+  value={frequency}
+  disabled={submitting}
+  onChange={(e) => setFrequency(e.target.value)}
+  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+>
+  <option value="daily">Daily</option>
+  <option value="weekly">Weekly</option>
+  <option value="monthly">Monthly</option>
+  <option value="quarterly">Quarterly</option>
+  <option value="yearly">Yearly</option>
+</select>
               </div>
 
               <div>
