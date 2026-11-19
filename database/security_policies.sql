@@ -163,3 +163,30 @@ END $$;
 
 REVOKE ALL ON FUNCTION public.deduct_spare_part(uuid,int,uuid), public.adjust_stock(uuid,int) FROM public, anon;
 GRANT EXECUTE ON FUNCTION public.deduct_spare_part(uuid,int,uuid), public.adjust_stock(uuid,int) TO authenticated;
+
+-- Adjust policy name if yours is named differently (e.g., "wo_insert")
+drop policy if exists "wo_insert" on public.work_orders;
+
+create policy "wo_insert"
+on public.work_orders
+for insert
+to authenticated
+with check (
+  -- Roles that can assign work orders to any valid user
+  exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and u.role in ('admin', 'superintendent', 'team_leader')
+  )
+  or (
+    -- Shift technicians can only create work orders assigned to themselves
+    exists (
+      select 1
+      from public.users u
+      where u.id = auth.uid()
+        and u.role = 'shift_technician'
+    )
+    and assigned_to = auth.uid()
+  )
+);

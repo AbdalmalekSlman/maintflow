@@ -27,7 +27,6 @@ interface UserOption {
   full_name: string
   role: string
 }
-// Check if the current logged-in user is restricted to View-Only
 
 export default function WorkOrdersPage() {
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([])
@@ -35,7 +34,9 @@ export default function WorkOrdersPage() {
   const [usersList, setUsersList] = useState<UserOption[]>([])
   const [loading, setLoading] = useState(true)
   const [userRole, setUserRole] = useState<PlantRole | null>(null)
-  const isReadOnly = userRole === 'manager' || userRole === 'stock_keeper'
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUserName, setCurrentUserName] = useState<string>('')
+
   // Form state
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -44,32 +45,51 @@ export default function WorkOrdersPage() {
   const [teamLeaderId, setTeamLeaderId] = useState('')
   const [assignedTo, setAssignedTo] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
   const router = useRouter()
 
- const fetchData = async () => {
-    // 1. Get current logged-in user session
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) return
+  // Derived role flags
+  const isReadOnly = userRole === 'manager' || userRole === 'stock_keeper'
+  const isShiftTech = userRole === 'shift_technician'
 
-    // 2. Fetch user profile to check their role
+  const fetchData = async () => {
+    setLoading(true)
+
+    // 1. Get current logged-in user session
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      setLoading(false)
+      return
+    }
+
+    setCurrentUserId(user.id)
+
+    // 2. Fetch user profile to check role and display name
     const { data: profile } = await supabase
       .from('users')
-      .select('role')
+      .select('role, full_name')
       .eq('id', user.id)
       .single()
-      if (profile?.role) {
-      setUserRole(profile.role as PlantRole) // <-- Add this line
+
+    const activeRole = (profile?.role as PlantRole) || null
+    if (activeRole) {
+      setUserRole(activeRole)
     }
+    setCurrentUserName(profile?.full_name || user.email || 'Current User')
 
     // 3. Build query based on role
     let query = supabase
       .from('work_orders')
-      .select('id, title, description, priority, status, created_at, equipment:equipment_id(name), team_leader:team_leader_id(full_name), assignee:assigned_to(full_name)')
+      .select(
+        'id, title, description, priority, status, created_at, equipment:equipment_id(name), team_leader:team_leader_id(full_name), assignee:assigned_to(full_name)'
+      )
       .order('created_at', { ascending: false })
 
     // If the user is a technician, restrict view strictly to work orders assigned to them
-    if (profile?.role === 'technician') {
+    if (activeRole === 'technician') {
       query = query.eq('assigned_to', user.id)
     }
 
@@ -85,7 +105,6 @@ export default function WorkOrdersPage() {
     if (eqData) setEquipmentList(eqData)
 
     const { data: userData } = await supabase.from('users').select('id, full_name, role')
-    
     if (userData) setUsersList(userData)
 
     setLoading(false)
@@ -95,11 +114,28 @@ export default function WorkOrdersPage() {
     fetchData()
   }, [])
 
+  useEffect(() => {
+    if (isShiftTech && currentUserId) {
+      setAssignedTo(currentUserId)
+    }
+  }, [isShiftTech, currentUserId])
+
   const handleCreateWorkOrder = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
 
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      alert('You must be logged in to create a work order.')
+      setSubmitting(false)
+      return
+    }
+
+    const finalAssignedTo =
+      userRole === 'shift_technician' ? user.id : assignedTo || null
 
     const { error } = await supabase.from('work_orders').insert([
       {
@@ -107,9 +143,9 @@ export default function WorkOrdersPage() {
         description,
         priority,
         equipment_id: equipmentId || null,
-        team_leader_id: teamLeaderId,
-        assigned_to: assignedTo,
-        created_by: user?.id,
+        team_leader_id: teamLeaderId || null,
+        assigned_to: finalAssignedTo,
+        created_by: user.id,
         status: 'assigned',
       },
     ])
@@ -122,32 +158,39 @@ export default function WorkOrdersPage() {
       setPriority('medium')
       setEquipmentId('')
       setTeamLeaderId('')
-      setAssignedTo('')
-      fetchData()
+      setAssignedTo(isShiftTech && currentUserId ? currentUserId : '')
+      await fetchData()
     }
     setSubmitting(false)
   }
 
   const updateStatus = async (id: string, newStatus: WorkOrder['status']) => {
+    if (isReadOnly) return
+
     const { error } = await supabase
       .from('work_orders')
       .update({ status: newStatus })
       .eq('id', id)
 
     if (!error) {
-      fetchData()
+      await fetchData()
     }
   }
-const teamLeaders = usersList?.filter((u) => u.role === 'team_leader') || []
-const technicians =
-  usersList?.filter((u) => u.role === 'technician' || u.role === 'shift_technician') || []
+
+  const teamLeaders = usersList.filter((u) => u.role === 'team_leader')
+  const technicians = usersList.filter(
+    (u) => u.role === 'technician' || u.role === 'shift_technician'
+  )
+
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Work Orders Dispatch</h1>
-            <p className="text-sm text-slate-500">Assign a mandatory Team Leader and Technician to plant maintenance tasks</p>
+            <p className="text-sm text-slate-500">
+              Assign a mandatory Team Leader and Technician to plant maintenance tasks
+            </p>
           </div>
           <button
             onClick={() => router.push('/dashboard')}
@@ -159,108 +202,124 @@ const technicians =
 
         {/* Create Work Order Form */}
         {userRole && Permissions.canCreateWorkOrder(userRole) && (
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-800 mb-4">Dispatch New Work Order</h2>
-          <form onSubmit={handleCreateWorkOrder} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="md:col-span-2">
-              <label className="block text-xs font-medium text-slate-600 mb-1">Task Title</label>
-              <input
-                type="text"
-                required
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Replace hydraulic seals on CNC Mill #1"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-800 mb-4">Dispatch New Work Order</h2>
+            <form onSubmit={handleCreateWorkOrder} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-slate-600 mb-1">Task Title</label>
+                <input
+                  type="text"
+                  required
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="e.g. Replace hydraulic seals on CNC Mill #1"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Priority</label>
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value as any)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
-              </select>
-            </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Priority</label>
+                <select
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value as any)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Target Equipment</label>
-              <select
-                value={equipmentId}
-                onChange={(e) => setEquipmentId(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-              >
-                <option value="">Select Equipment (Optional)</option>
-                {equipmentList.map((eq) => (
-                  <option key={eq.id} value={eq.id}>{eq.name}</option>
-                ))}
-              </select>
-            </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Target Equipment</label>
+                <select
+                  value={equipmentId}
+                  onChange={(e) => setEquipmentId(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                >
+                  <option value="">Select Equipment (Optional)</option>
+                  {equipmentList.map((eq) => (
+                    <option key={eq.id} value={eq.id}>
+                      {eq.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Assign Team Leader (Required)</label>
-              <select
-                required
-                value={teamLeaderId}
-                onChange={(e) => setTeamLeaderId(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-              >
-                <option value="">Select Team Leader</option>
-  {teamLeaders.map((tl) => (
-    <option key={tl.id} value={tl.id}>
-      {tl.full_name}
-    </option>
-  ))}
-              </select>
-            </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Assign Team Leader (Required)
+                </label>
+                <select
+                  required
+                  value={teamLeaderId}
+                  onChange={(e) => setTeamLeaderId(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                >
+                  <option value="">Select Team Leader</option>
+                  {teamLeaders.map((tl) => (
+                    <option key={tl.id} value={tl.id}>
+                      {tl.full_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Assign Technician (Required)</label>
-              <select
-                required
-                value={assignedTo}
-                onChange={(e) => setAssignedTo(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-              >
-                <option value="">Select Technician</option>
-  {technicians.map((tech) => (
-    <option key={tech.id} value={tech.id}>
-      {tech.full_name}
-    </option>
-  ))}
-              </select>
-            </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Assign Technician (Required)
+                </label>
+                {isShiftTech ? (
+                  <input
+                    type="text"
+                    value={currentUserName || 'Assigned to You'}
+                    disabled
+                    className="w-full px-3 py-2 text-sm bg-slate-100 border border-slate-300 rounded-lg text-slate-600 cursor-not-allowed"
+                  />
+                ) : (
+                  <select
+                    required
+                    value={assignedTo}
+                    onChange={(e) => setAssignedTo(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  >
+                    <option value="">Select Technician</option>
+                    {technicians.map((tech) => (
+                      <option key={tech.id} value={tech.id}>
+                        {tech.full_name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
 
-            <div className="md:col-span-3">
-              <label className="block text-xs font-medium text-slate-600 mb-1">Description & Instructions</label>
-              <textarea
-                rows={2}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Provide details on symptoms, required tools, or safety notes..."
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
+              <div className="md:col-span-3">
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Description & Instructions
+                </label>
+                <textarea
+                  rows={2}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Provide details on symptoms, required tools, or safety notes..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
 
-            <div className="md:col-span-3 flex justify-end">
-              {/* Only show Create Work Order button if user is authorized (Managers will not see this) */}
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 shadow-sm"
-              >
-                {submitting ? 'Dispatching...' : 'Dispatch Work Order'}
-              </button>
-            </div>
-          </form>
-        </div>
+              <div className="md:col-span-3 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 shadow-sm"
+                >
+                  {submitting ? 'Dispatching...' : 'Dispatch Work Order'}
+                </button>
+              </div>
+            </form>
+          </div>
         )}
+
         {/* Work Orders List */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-200">
@@ -269,61 +328,82 @@ const technicians =
           {loading ? (
             <div className="p-8 text-center text-slate-500">Loading work orders...</div>
           ) : workOrders.length === 0 ? (
-            <div className="p-8 text-center text-slate-500">No work orders dispatched yet. Create your first task above!</div>
+            <div className="p-8 text-center text-slate-500">
+              No work orders dispatched yet. Create your first task above!
+            </div>
           ) : (
             <div className="divide-y divide-slate-200">
               {workOrders.map((wo) => (
-                <div key={wo.id} className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-slate-50 transition">
+                <div
+                  key={wo.id}
+                  className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-slate-50 transition"
+                >
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <h3 
+                      <h3
                         onClick={() => router.push(`/dashboard/work-orders/${wo.id}`)}
                         className="font-semibold text-slate-900 hover:text-blue-600 cursor-pointer transition"
                       >
                         {wo.title}
                       </h3>
-                      <span className={`px-2 py-0.5 rounded text-xs font-semibold uppercase ${
-                        wo.priority === 'urgent' ? 'bg-red-100 text-red-800' :
-                        wo.priority === 'high' ? 'bg-amber-100 text-amber-800' :
-                        'bg-blue-100 text-blue-800'
-                      }`}>
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-semibold uppercase ${
+                          wo.priority === 'urgent'
+                            ? 'bg-red-100 text-red-800'
+                            : wo.priority === 'high'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-blue-100 text-blue-800'
+                        }`}
+                      >
                         {wo.priority}
                       </span>
                     </div>
                     <p className="text-sm text-slate-600">{wo.description || 'No description provided.'}</p>
                     <p className="text-xs text-slate-400">
-                      Equipment: <span className="font-medium text-slate-700">{wo.equipment?.name || 'General Facility'}</span> • 
-                      Team Leader: <span className="font-medium text-slate-700">{wo.team_leader?.full_name || 'Unassigned'}</span> • 
-                      Tech: <span className="font-medium text-slate-700">{wo.assignee?.full_name || 'Unassigned'}</span>
+                      Equipment:{' '}
+                      <span className="font-medium text-slate-700">
+                        {wo.equipment?.name || 'General Facility'}
+                      </span>{' '}
+                      • Team Leader:{' '}
+                      <span className="font-medium text-slate-700">
+                        {wo.team_leader?.full_name || 'Unassigned'}
+                      </span>{' '}
+                      • Tech:{' '}
+                      <span className="font-medium text-slate-700">
+                        {wo.assignee?.full_name || 'Unassigned'}
+                      </span>
                     </p>
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      wo.status === 'verified_closed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                      wo.status === 'completed_pending_review' ? 'bg-purple-50 text-purple-700 border border-purple-200' :
-                      wo.status === 'in_progress' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
-                      'bg-slate-100 text-slate-700 border border-slate-200'
-                    }`}>
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                        wo.status === 'verified_closed'
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : wo.status === 'completed_pending_review'
+                          ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                          : wo.status === 'in_progress'
+                          ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                          : 'bg-slate-100 text-slate-700 border border-slate-200'
+                      }`}
+                    >
                       {wo.status.replace(/_/g, ' ').toUpperCase()}
                     </span>
-                     {isReadOnly ? (
-  /* Read-only badge for Managers */
-  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 capitalize">
-    {wo.status.replace('_', ' ')}
-  </span>
-) : (
-  /* Interactive dropdown for operational roles */
-                    <select
-                      value={wo.status}
-                      onChange={(e) => updateStatus(wo.id, e.target.value as any)}
-                      className="px-2.5 py-1 text-xs font-medium bg-white border border-slate-300 rounded-lg text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-600"
-                    >
-                      <option value="assigned">Assigned</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="completed_pending_review">Pending Review</option>
-                      <option value="verified_closed">Verified Closed</option>
-                    </select>
+                    {isReadOnly ? (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 capitalize">
+                        {wo.status.replace('_', ' ')}
+                      </span>
+                    ) : (
+                      <select
+                        value={wo.status}
+                        onChange={(e) => updateStatus(wo.id, e.target.value as any)}
+                        className="px-2.5 py-1 text-xs font-medium bg-white border border-slate-300 rounded-lg text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-600"
+                      >
+                        <option value="assigned">Assigned</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed_pending_review">Pending Review</option>
+                        <option value="verified_closed">Verified Closed</option>
+                      </select>
                     )}
                   </div>
                 </div>
