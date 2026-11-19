@@ -21,6 +21,12 @@ export default function EquipmentPage() {
   const [location, setLocation] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [userRole, setUserRole] = useState<PlantRole | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editAssetTag, setEditAssetTag] = useState('')
+  const [editLocation, setEditLocation] = useState('')
+  const [editStatus, setEditStatus] = useState<'operational' | 'under_maintenance' | 'out_of_service'>('operational')
+  const [savingEdit, setSavingEdit] = useState(false)
   const router = useRouter()
 
   const fetchEquipment = async () => {
@@ -109,6 +115,65 @@ export default function EquipmentPage() {
     }
   }
 
+  const startEditing = (item: EquipmentItem) => {
+    setEditingId(item.id)
+    setEditName(item.name)
+    setEditAssetTag(item.asset_tag ?? '')
+    setEditLocation(item.location ?? '')
+    setEditStatus(item.status)
+  }
+
+  const cancelEditing = () => {
+    setEditingId(null)
+    setEditName('')
+    setEditAssetTag('')
+    setEditLocation('')
+    setEditStatus('operational')
+  }
+
+  const handleSaveEdit = async (id: string) => {
+    const trimmedName = editName.trim()
+    if (!trimmedName) {
+      alert('Please enter an equipment name.')
+      return
+    }
+
+    const normalizedTag = editAssetTag.trim() || null
+    setSavingEdit(true)
+
+    try {
+      const { error } = await supabase
+        .from('equipment')
+        .update({
+          name: trimmedName,
+          asset_tag: normalizedTag,
+          location: editLocation.trim() || null,
+          status: editStatus,
+        })
+        .eq('id', id)
+
+      if (error) {
+        if (error.code === '23505') {
+          alert(
+            normalizedTag
+              ? `An asset with Asset Tag "${normalizedTag}" already exists. Please use a unique Asset Tag.`
+              : 'An asset with this Asset Tag already exists. Please use a unique Asset Tag.'
+          )
+        } else {
+          alert('Error updating equipment: ' + error.message)
+        }
+        return
+      }
+
+      cancelEditing()
+      await fetchEquipment()
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  const canEdit = Boolean(userRole && Permissions.canEditEquipment(userRole))
+
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-5xl mx-auto space-y-6">
@@ -126,7 +191,7 @@ export default function EquipmentPage() {
         </div>
 
         {/* Add Equipment Form */}
-        {userRole && Permissions.canEditEquipment(userRole) && (
+        {canEdit && (
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-800 mb-4">Register New Equipment</h2>
             <form onSubmit={handleAddEquipment} className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -194,27 +259,124 @@ export default function EquipmentPage() {
                     <th className="px-6 py-3 font-medium">Asset Tag</th>
                     <th className="px-6 py-3 font-medium">Location</th>
                     <th className="px-6 py-3 font-medium">Status</th>
+                    {canEdit && <th className="px-6 py-3 font-medium text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 text-slate-700">
-                  {equipment.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-50">
-                      <td className="px-6 py-4 font-medium text-slate-900">{item.name}</td>
-                      <td className="px-6 py-4 font-mono text-xs text-slate-600">{item.asset_tag || '—'}</td>
-                      <td className="px-6 py-4">{item.location || '—'}</td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-                          item.status === 'operational'
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            : item.status === 'under_maintenance'
-                            ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                            : 'bg-red-50 text-red-700 border border-red-200'
-                        }`}>
-                          {item.status.replace('_', ' ').toUpperCase()}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {equipment.map((item) => {
+                    const isEditing = editingId === item.id
+
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-50">
+                        <td className="px-6 py-4 font-medium text-slate-900">
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={editName}
+                              disabled={savingEdit}
+                              onChange={(e) => setEditName(e.target.value)}
+                              className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md text-sm text-slate-900"
+                            />
+                          ) : (
+                            item.name
+                          )}
+                        </td>
+
+                        <td className="px-6 py-4 font-mono text-xs text-slate-600">
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={editAssetTag}
+                              disabled={savingEdit}
+                              onChange={(e) => setEditAssetTag(e.target.value)}
+                              className="w-full px-2.5 py-1.5 font-mono text-xs border border-slate-300 rounded-md text-slate-900"
+                            />
+                          ) : (
+                            item.asset_tag || '—'
+                          )}
+                        </td>
+
+                        <td className="px-6 py-4">
+                          {isEditing ? (
+                            <input
+                              type="text"
+                              value={editLocation}
+                              disabled={savingEdit}
+                              onChange={(e) => setEditLocation(e.target.value)}
+                              className="w-full px-2.5 py-1.5 border border-slate-300 rounded-md text-sm text-slate-900"
+                            />
+                          ) : (
+                            item.location || '—'
+                          )}
+                        </td>
+
+                        <td className="px-6 py-4">
+                          {isEditing ? (
+                            <select
+                              value={editStatus}
+                              disabled={savingEdit}
+                              onChange={(e) =>
+                                setEditStatus(
+                                  e.target.value as 'operational' | 'under_maintenance' | 'out_of_service'
+                                )
+                              }
+                              className="px-2.5 py-1.5 border border-slate-300 rounded-md text-xs font-medium text-slate-900 bg-white"
+                            >
+                              <option value="operational">OPERATIONAL</option>
+                              <option value="under_maintenance">UNDER MAINTENANCE</option>
+                              <option value="out_of_service">OUT OF SERVICE</option>
+                            </select>
+                          ) : (
+                            <span
+                              className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                item.status === 'operational'
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : item.status === 'under_maintenance'
+                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  : 'bg-red-50 text-red-700 border border-red-200'
+                              }`}
+                            >
+                              {item.status.replace('_', ' ').toUpperCase()}
+                            </span>
+                          )}
+                        </td>
+
+                        {canEdit && (
+                          <td className="px-6 py-4 text-right whitespace-nowrap">
+                            {isEditing ? (
+                              <div className="inline-flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={savingEdit}
+                                  onClick={() => handleSaveEdit(item.id)}
+                                  className="px-3 py-1 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-md disabled:opacity-50"
+                                >
+                                  {savingEdit ? 'Saving...' : 'Save'}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={savingEdit}
+                                  onClick={cancelEditing}
+                                  className="px-3 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md disabled:opacity-50"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={editingId !== null}
+                                onClick={() => startEditing(item)}
+                                className="px-3 py-1 text-xs font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md disabled:opacity-40"
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
