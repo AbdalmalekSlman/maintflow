@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/utils/supabase/admin'
-
+import { consumeRateLimit } from '@/utils/auth/rate-limit'
 const GENERIC_MESSAGE =
   'If this employee number is registered, your request has been submitted to the Admin.'
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
+import { consumeRateLimit } from '@/utils/auth/rate-limit'
 
 
 const INVALID_CREDENTIALS = 'Invalid employee number or password'
@@ -61,6 +62,36 @@ export async function POST(request: Request) {
         { status: 401, headers }
       )
     }
+    // Persistent rate limit: 10 attempts per 15 minutes.
+// This runs before looking up the employee in the database.
+const rateLimit = await consumeRateLimit(
+  'employee-login',
+  employeeNumber,
+  10,
+  15 * 60
+)
+
+if (rateLimit.error) {
+  return NextResponse.json(
+    { error: 'Unable to sign in right now' },
+    { status: 503, headers }
+  )
+}
+
+if (!rateLimit.allowed) {
+  return NextResponse.json(
+    {
+      error: 'Too many login attempts. Please try again later.',
+    },
+    {
+      status: 429,
+      headers: {
+        ...headers,
+        'Retry-After': '900',
+      },
+    }
+  )
+}
 
     // Use the privileged client only to resolve the
     // employee number to the internal Auth identity.
