@@ -9,7 +9,9 @@ type Profile = {
   employee_number: string | null
   role: string
   password_changed_at: string | null
+  must_change_password: boolean
 }
+  
 
 export default function MyAccountPage() {
   const router = useRouter()
@@ -41,8 +43,8 @@ export default function MyAccountPage() {
       const { data, error: profileError } = await supabase
         .from('users')
         .select(
-          'full_name, employee_number, role, password_changed_at'
-        )
+  'full_name, employee_number, role, password_changed_at, must_change_password'
+)
         .eq('id', user.id)
         .single()
 
@@ -116,14 +118,19 @@ export default function MyAccountPage() {
       )
 
       if (!result.warning) {
-        setProfile(previous => previous
-          ? {
-              ...previous,
-              password_changed_at: new Date().toISOString(),
-            }
-          : previous
-        )
+  setProfile(previous => previous
+    ? {
+        ...previous,
+        password_changed_at: new Date().toISOString(),
+        must_change_password: false,
       }
+    : previous
+  )
+
+  // Full navigation ensures the dashboard loads
+  // with the latest Supabase session and account status.
+  window.location.assign('/dashboard')
+}
     } catch {
       setError('Connection error. Please try again.')
     } finally {
@@ -142,17 +149,33 @@ export default function MyAccountPage() {
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-2xl mx-auto space-y-6">
-        <button
-          onClick={() => router.push('/dashboard')}
-          className="text-sm text-blue-700 hover:underline"
-        >
-          ← Back to Dashboard
-        </button>
+        {!profile?.must_change_password && (
+  <a
+    href="/dashboard"
+    className="inline-flex items-center text-sm font-medium text-blue-700 cursor-pointer hover:text-blue-900 hover:underline"
+  >
+    ← Back to Dashboard
+  </a>
+)}
 
         <h1 className="text-2xl font-bold text-slate-900">
           My Account
         </h1>
+{profile?.must_change_password && (
+  <div
+    role="alert"
+    className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-900"
+  >
+    <p className="font-semibold">
+      Password Change Required
+    </p>
 
+    <p className="mt-1 text-sm">
+      You are using a temporary password.
+      Please change your password before accessing MaintFlow.
+    </p>
+  </div>
+)}
         <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-3">
           <h2 className="text-lg font-semibold text-slate-900">
             Account Information

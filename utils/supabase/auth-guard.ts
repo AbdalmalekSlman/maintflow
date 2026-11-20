@@ -1,11 +1,6 @@
-
 import { createClient } from '@/utils/supabase/server'
 import type { PlantRole } from '@/lib/permissions'
 
-/**
- * Authenticates the current request and verifies its role.
- * The authoritative user table in MaintFlow is public.users.
- */
 export async function verifyUserRole(allowed: PlantRole[]) {
   const supabase = await createClient()
 
@@ -18,20 +13,28 @@ export async function verifyUserRole(allowed: PlantRole[]) {
     throw new Error('Unauthorized: please sign in.')
   }
 
-  const { data: userRecord, error: roleError } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('users')
-    .select('role')
+    .select('role, must_change_password')
     .eq('id', user.id)
     .single()
 
-  if (roleError || !userRecord?.role) {
-    throw new Error('Unable to verify your user role.')
+  if (profileError || !profile?.role) {
+    throw new Error('Unable to verify your account.')
   }
 
-  const role = userRecord.role as PlantRole
+  if (profile.must_change_password) {
+    throw new Error(
+      'You must change your password before using MaintFlow.'
+    )
+  }
+
+  const role = profile.role as PlantRole
 
   if (!allowed.includes(role)) {
-    throw new Error('Forbidden: your role cannot perform this action.')
+    throw new Error(
+      'Forbidden: your role cannot perform this action.'
+    )
   }
 
   return { supabase, user, role }
