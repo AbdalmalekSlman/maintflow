@@ -1,18 +1,8 @@
 ﻿# MaintFlow provider runbook
 
-## Rehearsal only
+## Completed staging rehearsal
 
-The current milestone uses the **existing Linux x64 staging artifact from bfa8a9d**. Review the legacy updater's units, cron, or hosting panel first. Confirm its exact fetch, checkout and trigger select only CCPs-INST main and that it ignores other branches. Record the result without keys or environment contents. Obtain the owner's explicit publication approval after verifying isolation. The local rehearsal bundle has no remote changes. The staging branch contains only maintflow.tar.gz, SHA256SUMS and release.json, and has no ancestry from main. It is outside the production workflow's trigger. The production installer fetches only deploy and rejects staging metadata.
-
-For the authorized publisher, import the reviewed bundle into a disposable CCPs-INST clone and inspect the tree. After the gate above, an authorized GitHub writer may push only the explicit rehearsal ref. Confirm the branch is absent or review any existing history first. Use a normal push.
-
-```sh
-git bundle verify /path/to/maintflow-rehearsal.bundle
-git fetch /path/to/maintflow-rehearsal.bundle refs/heads/maintflow-rehearsal:refs/heads/maintflow-rehearsal
-git ls-tree -r --name-only refs/heads/maintflow-rehearsal
-# Only after permission and legacy-updater isolation are confirmed:
-git push origin refs/heads/maintflow-rehearsal:refs/heads/maintflow-rehearsal
-```
+The provider completed the private rehearsal with CCPs-INST `maintflow-rehearsal` at `b5c1e2f`, then stopped the rehearsal service. The provider confirmed the legacy updater fetches only `CCPs-INST/main` every two minutes and restarts Flask. The rehearsal branch contains only `maintflow.tar.gz`, `SHA256SUMS` and `release.json`. It is outside the production workflow's trigger. The production installer fetches only `deploy` and rejects staging metadata. The commands below are retained for reference. Use the [production provider handoff](provider-cutover.md) for the next server session.
 
 ### VPS web console procedure
 

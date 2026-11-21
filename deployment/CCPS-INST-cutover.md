@@ -1,6 +1,6 @@
 # MaintFlow cutover on the CCPs-INST VPS
 
-Keep `AbdalmalekSlman/maintflow` as the source of record. Use `CCPs-INST` as the deployment mirror only after the owner approves its first replacement commit. The candidate commit preserves the old Git history and replaces the tracked tree with the exact approved MaintFlow tree.
+Keep `AbdalmalekSlman/maintflow` as the source of record and `CCPs-INST/main` as the Flask restore source. The approved pull workflow delivers compiled MaintFlow releases through the separate `CCPs-INST/deploy` branch.
 
 ## 1. Back up and inventory the live site
 
@@ -11,4 +11,4 @@ Keep `AbdalmalekSlman/maintflow` as the source of record. Use `CCPs-INST` as the
 
 ## 2. Provider-approved pull deployment
 
-Use the [pull deployment runbook](pull/README.md) for the separate CCPs-INST control and deploy branches, GitHub release build, systemd and nginx, and the initial cutover and rollback. Keep the reviewed replacement-source bundle as an offline reference. The live architecture pulls compiled release files from the CCPs-INST deploy branch.
+Use the [provider handoff](pull/provider-cutover.md) for the first cutover and rollback. The [pull deployment runbook](pull/README.md) explains the control and deploy branches, GitHub release build, systemd and nginx.
