@@ -71,9 +71,6 @@ CREATE TABLE IF NOT EXISTS public.password_reset_requests (
     CONSTRAINT password_reset_requests_employee_number_check
         CHECK (employee_number ~ '^[1-9][0-9]*$'),
 
-    CONSTRAINT password_reset_requests_status_check
-        CHECK (status IN ('pending', 'approved', 'rejected', 'completed')),
-
     CONSTRAINT password_reset_requests_note_length_check
         CHECK (request_note IS NULL OR char_length(request_note) <= 500),
 
@@ -82,12 +79,20 @@ CREATE TABLE IF NOT EXISTS public.password_reset_requests (
 );
 
 
--- 4. Only one pending request per identified user.
+-- 4. Track reset claims and allow one active request per identified user.
+
+ALTER TABLE public.password_reset_requests
+    ADD COLUMN IF NOT EXISTS reset_started_at TIMESTAMPTZ,
+    DROP CONSTRAINT IF EXISTS password_reset_requests_status_check,
+    ADD CONSTRAINT password_reset_requests_status_check
+        CHECK (status IN ('pending', 'approved', 'processing', 'rejected', 'completed'));
 
 CREATE UNIQUE INDEX IF NOT EXISTS
-    password_reset_requests_one_pending_per_user_idx
+    password_reset_requests_one_active_per_user_idx
 ON public.password_reset_requests (user_id)
-WHERE status = 'pending' AND user_id IS NOT NULL;
+WHERE status IN ('pending', 'approved', 'processing') AND user_id IS NOT NULL;
+
+DROP INDEX IF EXISTS public.password_reset_requests_one_pending_per_user_idx;
 
 
 -- 5. Indexes for Admin request management and user history.
