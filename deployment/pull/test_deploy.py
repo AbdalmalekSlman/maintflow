@@ -4,12 +4,13 @@ import json
 from pathlib import Path
 import subprocess
 import tarfile
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
 
 import deploy_release as deploy
-from publish_deploy import publish
+from publish_deploy import publish, verify_review
 
 
 SOURCE = "1" * 40
@@ -24,7 +25,7 @@ def metadata():
 
 
 def archive(path, extra=None):
-    entries = {"server.js": "// fixture", "release.json": json.dumps(metadata()), "public/file.svg": "<svg/>",
+    entries = {"server.js": "// fixture", "release.json": json.dumps(metadata()), "public/file.svg": "<svg/>", "public/maintflow-revision.txt": SOURCE,
                "node_modules/next/package.json": "{}", ".next/static/test.js": "// fixture"}
     with tarfile.open(path, "w:gz") as package:
         for name, value in (entries | (extra or {})).items():
@@ -56,6 +57,8 @@ class DeploymentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             release = Path(tmp)
             (release / "release.json").write_text(json.dumps(metadata()), encoding="utf-8")
+            (release / "public").mkdir()
+            (release / "public/maintflow-revision.txt").write_text(SOURCE, encoding="ascii")
             env = dict(NEXT_PUBLIC_SUPABASE_URL=URL, NEXT_PUBLIC_SUPABASE_ANON_KEY=KEY,
                        SUPABASE_SERVICE_ROLE_KEY="fixture", AUTH_RATE_LIMIT_SECRET="fixture",
                        AUTH_TRUSTED_ORIGIN="https://ccp-inst.duckdns.org")
@@ -85,19 +88,17 @@ class DeploymentTests(unittest.TestCase):
                     deploy.verify_runtime(release, deploy.STAGING_PROJECT, rehearsal=True)
 
     def test_failed_candidate_leaves_current_intact(self):
-        self.check_activation([None, OSError("candidate unavailable")], [])
+        self.check_activation([None, OSError("candidate unavailable")], ["new"])
 
     def test_health_rejects_a_different_service_on_the_port(self):
-        with patch.object(deploy.subprocess, "check_output", side_effect=lambda command, **_: (
-                "9999\n" if command[0] == "systemctl" else
-                'LISTEN 0 511 127.0.0.1:18100 0.0.0.0:* users:(("portal",pid=333,fd=7))'
-        )), patch.object(deploy.time, "sleep"), patch.object(deploy, "build_opener") as opener:
-            with self.assertRaisesRegex(OSError, "does not own"):
-                deploy.check_health(18100, "maintflow-candidate@test.service")
-            opener.return_value.open.assert_not_called()
+        with patch.object(deploy, "service"), patch.object(deploy.time, "sleep"), \
+                patch.object(deploy, "build_opener") as opener:
+            opener.return_value.open.return_value.__enter__.return_value.read.return_value = b"unrelated portal"
+            with self.assertRaisesRegex(OSError, "expected MaintFlow release"):
+                deploy.check_health(18100, deploy.CANDIDATE_UNIT, SOURCE)
 
     def test_failed_activation_restores_current(self):
-        self.check_activation([None, None, OSError("new release unavailable"), None], ["new", "old"])
+        self.check_activation([None, None, OSError("new release unavailable"), None], ["new", "new", "old"])
 
     def check_activation(self, health_outcomes, expected_links):
         with tempfile.TemporaryDirectory() as tmp:
@@ -116,14 +117,82 @@ class DeploymentTests(unittest.TestCase):
                     patch.object(Path, "resolve", autospec=True, side_effect=resolve), \
                     patch.object(deploy, "service") as service, \
                     patch.object(deploy, "has_candidate_headroom", return_value=True), \
+                    patch.object(deploy, "health_marker", return_value=SOURCE), \
                     patch.object(deploy, "switch_current") as switch, \
                     patch.object(deploy, "check_health", side_effect=health_outcomes):
                 with self.assertRaises((OSError, RuntimeError)):
-                    deploy.activate(root, new, SOURCE)
+                    deploy.activate(root, new)
                 self.assertEqual([call.args[1].name for call in switch.call_args_list], expected_links)
-                self.assertIn(("stop", f"maintflow-candidate@{SOURCE}.service"), [call.args for call in service.call_args_list])
+                self.assertIn(("stop", deploy.CANDIDATE_UNIT), [call.args for call in service.call_args_list])
                 self.assertEqual([call.args[1] for call in service.call_args_list if call.args[0] == "restart"],
-                                 ["maintflow.service"] * len(expected_links))
+                                 ["maintflow.service"] * (len(expected_links) - 1))
+
+    def test_owner_review_is_required_for_the_production_environment(self):
+        approved = {"state": "approved", "user": {"id": 114194821},
+                    "environments": [{"name": "maintflow-publish-production"}]}
+        verify_review([approved])
+        for review in ([], [approved | {"state": "rejected"}],
+                       [approved | {"user": {"id": 1}}],
+                       [approved | {"environments": [{"name": "staging"}]}]):
+            with self.assertRaisesRegex(ValueError, "no recorded owner approval"):
+                verify_review(review)
+
+    def test_provenance_verifier_pins_workflow_and_repository(self):
+        with patch.object(deploy, "read_root_owned_text"), \
+                patch.object(deploy.subprocess, "check_output", return_value="1454977197\n") as verify:
+            deploy.verify_provenance(Path("archive"), Path("bundle"))
+            command = verify.call_args.args[0]
+            self.assertIn("AbdalmalekSlman/CCPs-INST/.github/workflows/maintflow-publish.yml", command)
+            self.assertIn("refs/heads/maintflow-release-control", command)
+            self.assertIn("--deny-self-hosted-runners", command)
+            verify.return_value = "1\n"
+            with self.assertRaisesRegex(ValueError, "original CCPs-INST repository"):
+                deploy.verify_provenance(Path("archive"), Path("bundle"))
+
+    def test_retention_preserves_current_previous_two_and_unmanaged_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            releases = root / "releases"
+            releases.mkdir()
+            paths = [releases / (str(i) * 40) for i in range(1, 6)]
+            for path in paths:
+                path.mkdir()
+            (releases / "unrelated").mkdir()
+            (root / "activation-history.json").write_text(json.dumps([path.name for path in paths[1:]]))
+            with patch.object(deploy, "health_marker", return_value=SOURCE), \
+                    patch.object(shutil.rmtree, "avoids_symlink_attacks", True):
+                deploy.record_and_prune(root, paths[0], paths[1])
+            self.assertEqual(set(releases.iterdir()), {*paths[:3], releases / "unrelated"})
+
+    def test_unprivileged_service_calls_are_exact(self):
+        with patch.object(deploy.subprocess, "run") as run:
+            deploy.service("restart", deploy.PRODUCTION_UNIT)
+            self.assertEqual(run.call_args.args[0], ["/usr/bin/sudo", "-n", "/usr/bin/systemctl", "restart", "maintflow.service"])
+            with self.assertRaisesRegex(ValueError, "Unsupported"):
+                deploy.service("restart", "ot_tracker.service")
+            self.assertEqual(run.call_count, 1)
+
+    def test_archive_links_are_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "link.tar.gz"
+            for link_type in (tarfile.SYMTYPE, tarfile.LNKTYPE):
+                with tarfile.open(package, "w:gz") as tar:
+                    link = tarfile.TarInfo("public/link")
+                    link.type = link_type
+                    link.linkname = "/opt/ot_tracker"
+                    tar.addfile(link)
+                with self.assertRaisesRegex(ValueError, "Archive links"):
+                    deploy.unpack(package, root / "destination")
+
+    def test_systemd_caps_and_portal_isolation(self):
+        folder = Path(__file__).parent
+        for unit in ("maintflow.service", "maintflow-candidate.service", "maintflow-rehearsal.service", "maintflow-updater.service"):
+            text = (folder / unit).read_text()
+            self.assertIn("CPUQuota=50%", text)
+            self.assertIn("InaccessiblePaths=/opt/ot_tracker /etc/ot_tracker.env /etc/ot_tracker_git", text)
+            self.assertIn("ReadWritePaths=/srv/maintflow", text)
+        self.assertIn("MemoryMax=700000000", (folder / "maintflow.service").read_text())
 
     def test_publish_is_fast_forward_and_only_changes_deploy(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -140,6 +209,7 @@ class DeploymentTests(unittest.TestCase):
             git("-C", checkout, "push", "origin", "main")
             old = git("-C", remote, "rev-parse", "main")
             package.mkdir()
+            (package / "provenance.jsonl").write_text("{}")
             (package / "release.json").write_text(json.dumps(metadata()), encoding="utf-8")
             tar = package / "maintflow.tar.gz"
 
@@ -155,7 +225,7 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(git("-C", remote, "rev-parse", f"{second}^"), first)
             self.assertEqual(git("-C", remote, "rev-parse", "main"), old)
             self.assertEqual(set(git("-C", remote, "ls-tree", "--name-only", "deploy").splitlines()),
-                             {"SHA256SUMS", "maintflow.tar.gz", "release.json"})
+                             {"SHA256SUMS", "maintflow.tar.gz", "release.json", "provenance.jsonl"})
             tar.write_bytes(b"wrong digest")
             with self.assertRaisesRegex(ValueError, "checksum"):
                 publish(checkout, package, SOURCE, PROJECT)

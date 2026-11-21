@@ -13,6 +13,9 @@ mkdirSync(destination)
 const nextOutput = realpathSync('.next')
 cpSync(join(nextOutput, 'standalone'), destination, options)
 cpSync('public', join(destination, 'public'), options)
+if (/^[a-f0-9]{40}$/.test(revision ?? '')) {
+  writeFileSync(join(destination, 'public', 'maintflow-revision.txt'), `${revision}\n`)
+}
 cpSync(join(nextOutput, 'static'), join(destination, '.next', 'static'), options)
 cpSync('deployment/start-standalone.mjs', join(destination, 'start.mjs'))
 const publicKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY

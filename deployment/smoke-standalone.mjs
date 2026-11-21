@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
-import { readdirSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { request } from 'node:http'
 import { join, resolve } from 'node:path'
 import { setTimeout as wait } from 'node:timers/promises'
@@ -67,6 +67,14 @@ try {
     if (expected === 307) assert.equal(new URL(response.headers.get('location'), origin).pathname, '/')
     await response.arrayBuffer()
     console.log(`${response.status} ${path}`)
+  }
+
+  const { revision } = JSON.parse(readFileSync(join(directory, 'release.json'), 'utf8'))
+  if (revision) {
+    const response = await fetch(`${origin}/maintflow-revision.txt`, { signal: AbortSignal.timeout(5000) })
+    assert.equal(response.status, 200)
+    assert.equal((await response.text()).trim(), revision)
+    console.log('Release revision health marker matched')
   }
 
   for (let batch = 0; batch < 5; batch++) {

@@ -59,6 +59,7 @@ jobs:
           npm run lint -- --max-warnings=0
           npx --no-install next typegen
           npx --no-install tsc --noEmit
+          python3 -B -m unittest discover -s deployment/pull -p test_deploy.py
 
       - name: Build, package, and smoke-test the extracted release
         env:

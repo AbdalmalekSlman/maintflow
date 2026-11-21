@@ -105,6 +105,8 @@ jobs:
     environment: maintflow-publish-production
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -114,10 +116,18 @@ jobs:
         with:
           name: maintflow-publish-${{ github.sha }}
           path: ${{ runner.temp }}/publish
+      - name: Verify the repository owner's approval
+        run: PYTHONPATH=control/deployment/pull python3 -B -c 'from publish_deploy import verify_workflow_review; verify_workflow_review()'
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        id: provenance
+        with:
+          subject-path: ${{ runner.temp }}/publish/maintflow.tar.gz
       - name: Publish only the deploy branch
         env:
           SOURCE_SHA: ${{ needs.build.outputs.source }}
           MAINTFLOW_PRODUCTION_SUPABASE_REF: ${{ vars.MAINTFLOW_PRODUCTION_SUPABASE_REF }}
+          PROVENANCE_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
         run: |
+          cp "$PROVENANCE_BUNDLE" "$RUNNER_TEMP/publish/provenance.jsonl"
           python3 -B control/deployment/pull/publish_deploy.py \
             control "$RUNNER_TEMP/publish" "$SOURCE_SHA" "$MAINTFLOW_PRODUCTION_SUPABASE_REF"

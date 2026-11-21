@@ -1,0 +1,23 @@
+[Unit]
+Description=Private MaintFlow release validation
+
+[Service]
+Type=simple
+User=maintflow
+Group=maintflow
+SupplementaryGroups=maintflow-cache
+WorkingDirectory=/srv/maintflow/candidate
+EnvironmentFile=/etc/maintflow/production.env
+ExecStartPre=/usr/bin/python3 -B /usr/local/lib/maintflow/deploy_release.py --verify-runtime /srv/maintflow/candidate
+ExecStart=/usr/bin/env NODE_ENV=production HOSTNAME=127.0.0.1 PORT=18100 /opt/node24/bin/node server.js
+MemoryAccounting=true
+MemoryMax=200000000
+CPUQuota=50%
+CPUAccounting=true
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+InaccessiblePaths=/opt/ot_tracker /etc/ot_tracker.env /etc/ot_tracker_git
+ReadWritePaths=/srv/maintflow/candidate/.next/cache
+UMask=0027
