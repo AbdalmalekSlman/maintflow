@@ -11,7 +11,6 @@ type Profile = {
   password_changed_at: string | null
   must_change_password: boolean
 }
-  
 
 export default function MyAccountPage() {
   const router = useRouter()
