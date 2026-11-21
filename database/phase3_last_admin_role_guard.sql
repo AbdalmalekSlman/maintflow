@@ -14,8 +14,8 @@ BEGIN
        AND NEW.role IS DISTINCT FROM 'admin'
     THEN
 
-        -- Serialize concurrent Admin demotions.
-        PERFORM pg_advisory_xact_lock(7698, 1001);
+        -- Share the lock used by prevent_last_admin_deletion().
+        PERFORM pg_catalog.pg_advisory_xact_lock(7342026112001::bigint);
 
         SELECT COUNT(*)
         INTO admin_count
