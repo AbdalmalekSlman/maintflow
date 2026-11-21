@@ -10,7 +10,6 @@ Group=maintflow-deploy
 SupplementaryGroups=maintflow-cache
 ExecStart=/usr/bin/python3 -B /usr/local/lib/maintflow/deploy_release.py --repo /var/lib/maintflow-deploy/CCPs-INST.git
 CPUQuota=50%
-CPUAccounting=true
 MemoryAccounting=true
 MemoryMax=700000000
 PrivateTmp=true

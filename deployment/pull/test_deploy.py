@@ -187,12 +187,25 @@ class DeploymentTests(unittest.TestCase):
 
     def test_systemd_caps_and_portal_isolation(self):
         folder = Path(__file__).parent
-        for unit in ("maintflow.service", "maintflow-candidate.service", "maintflow-rehearsal.service", "maintflow-updater.service"):
-            text = (folder / unit).read_text()
-            self.assertIn("CPUQuota=50%", text)
-            self.assertIn("InaccessiblePaths=/opt/ot_tracker /etc/ot_tracker.env /etc/ot_tracker_git", text)
-            self.assertIn("ReadWritePaths=/srv/maintflow", text)
-        self.assertIn("MemoryMax=700000000", (folder / "maintflow.service").read_text())
+        limits = {
+            "maintflow.service": "700000000",
+            "maintflow-candidate.service": "200000000",
+            "maintflow-rehearsal.service": "700000000",
+            "maintflow-updater.service": "700000000",
+        }
+        for unit, memory_limit in limits.items():
+            with self.subTest(unit=unit):
+                lines = (folder / unit).read_text().splitlines()
+                self.assertIn("CPUQuota=50%", lines)
+                self.assertIn(f"MemoryMax={memory_limit}", lines)
+                self.assertIn("InaccessiblePaths=/opt/ot_tracker /etc/ot_tracker.env /etc/ot_tracker_git", lines)
+                self.assertTrue(any(line.startswith("ReadWritePaths=/srv/maintflow") for line in lines))
+                self.assertTrue(any(line.startswith("User=maintflow") for line in lines))
+                self.assertFalse(any(line.startswith("CPUAccounting=") for line in lines))
+                self.assertEqual(
+                    [line for line in lines if line.startswith("SuccessExitStatus=")],
+                    [] if unit == "maintflow-updater.service" else ["SuccessExitStatus=143"],
+                )
 
     def test_publish_is_fast_forward_and_only_changes_deploy(self):
         with tempfile.TemporaryDirectory() as tmp:

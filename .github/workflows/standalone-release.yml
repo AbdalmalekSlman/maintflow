@@ -61,6 +61,9 @@ jobs:
           npx --no-install tsc --noEmit
           python3 -B -m unittest discover -s deployment/pull -p test_deploy.py
 
+      - name: Verify systemd unit files
+        run: systemd-analyze verify --man=no --recursive-errors=no deployment/pull/*.service
+
       - name: Build, package, and smoke-test the extracted release
         env:
           RELEASE_TARGET: ${{ steps.configuration.outputs.target }}

@@ -78,6 +78,8 @@ Record sanitized status and memory figures. Keep the tested archive and logs unt
 
 ## Production after separate cutover approval
 
+Use the [production checklist](production-checklist.md) to track the database, backup, approval and cutover prerequisites.
+
 Maintain development in [MaintFlow](https://github.com/AbdalmalekSlman/maintflow). In the public CCPs-INST repository create the maintflow-release-control branch after provider and owner approval. Install [ccps-workflow.yml](ccps-workflow.yml) at .github/workflows/maintflow-publish.yml and copy deploy_release.py and publish_deploy.py to deployment/pull on the control branch. Restrict control branch changes to trusted maintainers. Main remains the Flask branch.
 
 1. In **CCPs-INST → Settings → Environments**, create maintflow-build-production and maintflow-publish-production. Select **Selected branches and tags** and allow only the **branch** maintflow-release-control on both. Under **Required reviewers** on the publish environment select AbdalmalekSlman. Disable administrator bypass. If the owner also submits release requests, either leave self-review enabled for that owner or arrange a separate requester and then enable **Prevent self-review**. Keep the publication gate active in both cases. Public repositories support required reviewers on current GitHub plans. If the controls are unavailable or the review API cannot verify the owner's approval, publication stops. There is no ungated mode.

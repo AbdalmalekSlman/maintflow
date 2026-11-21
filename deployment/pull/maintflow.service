@@ -12,12 +12,12 @@ WorkingDirectory=/srv/maintflow/current
 EnvironmentFile=/etc/maintflow/production.env
 ExecStartPre=/usr/bin/python3 -B /usr/local/lib/maintflow/deploy_release.py --verify-runtime /srv/maintflow/current
 ExecStart=/usr/bin/env NODE_ENV=production HOSTNAME=127.0.0.1 PORT=8100 /opt/node24/bin/node server.js
+SuccessExitStatus=143
 Restart=on-failure
 RestartSec=3
 MemoryAccounting=true
 MemoryMax=700000000
 CPUQuota=50%
-CPUAccounting=true
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
