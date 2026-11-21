@@ -1,3 +1,4 @@
+import { isTrustedRequestOrigin } from '@/utils/auth/request-origin'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
@@ -13,10 +14,7 @@ export async function POST(request: Request) {
 
   try {
     // Allow requests only from this application's origin.
-    const origin = request.headers.get('origin')
-    const expectedOrigin = new URL(request.url).origin
-
-    if (!origin || origin !== expectedOrigin) {
+    if (!isTrustedRequestOrigin(request)) {
       return NextResponse.json(
         { error: 'Forbidden' },
         { status: 403, headers }

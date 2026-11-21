@@ -1,3 +1,4 @@
+import { isTrustedRequestOrigin } from '@/utils/auth/request-origin'
 import { randomBytes } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
@@ -18,10 +19,7 @@ function reply(body: object, status = 200) {
 export async function POST(request: Request) {
   try {
     // CSRF protection
-    const origin = request.headers.get('origin')
-    const expectedOrigin = new URL(request.url).origin
-
-    if (!origin || origin !== expectedOrigin) {
+    if (!isTrustedRequestOrigin(request)) {
       return reply({ error: 'Forbidden' }, 403)
     }
 

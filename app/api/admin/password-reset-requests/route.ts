@@ -1,3 +1,4 @@
+import { isTrustedRequestOrigin } from '@/utils/auth/request-origin'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
@@ -73,10 +74,7 @@ export async function GET() {
 // Admin: approve or reject a pending request
 export async function PATCH(request: Request) {
   try {
-    const origin = request.headers.get('origin')
-    const expectedOrigin = new URL(request.url).origin
-
-    if (!origin || origin !== expectedOrigin) {
+    if (!isTrustedRequestOrigin(request)) {
       return reply({ error: 'Forbidden' }, 403)
     }
 

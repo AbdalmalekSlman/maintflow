@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start --hostname 127.0.0.1",
+    "start": "node build/standalone-release/start.mjs",
+    "package:standalone": "node deployment/package-standalone.mjs",
     "lint": "eslint"
   },
   "dependencies": {

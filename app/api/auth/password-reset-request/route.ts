@@ -1,3 +1,4 @@
+import { isTrustedRequestOrigin } from '@/utils/auth/request-origin'
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/utils/supabase/admin'
 import { consumeRateLimit } from '@/utils/auth/rate-limit'
@@ -12,10 +13,7 @@ export async function POST(request: Request) {
 
   try {
     // Reject requests from a different website.
-    const origin = request.headers.get('origin')
-    const expectedOrigin = new URL(request.url).origin
-
-    if (!origin || origin !== expectedOrigin) {
+    if (!isTrustedRequestOrigin(request)) {
       return respond({ error: 'Forbidden' }, 403)
     }
 

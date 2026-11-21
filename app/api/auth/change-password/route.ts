@@ -1,3 +1,4 @@
+import { isTrustedRequestOrigin } from '@/utils/auth/request-origin'
 import { NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/utils/supabase/server'
@@ -11,10 +12,7 @@ export async function POST(request: Request) {
 
   try {
     // Reject cross-origin requests.
-    const origin = request.headers.get('origin')
-    const expectedOrigin = new URL(request.url).origin
-
-    if (!origin || origin !== expectedOrigin) {
+    if (!isTrustedRequestOrigin(request)) {
       return reply({ error: 'Forbidden' }, 403)
     }
 

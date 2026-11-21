@@ -1,0 +1,82 @@
+name: Build MaintFlow standalone release
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Supabase target used to build the artifact
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    environment: maintflow-build-${{ inputs.target }}
+    timeout-minutes: 20
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Verify build configuration
+        run: |
+          node --input-type=module - <<'NODE'
+          const { NEXT_PUBLIC_SUPABASE_URL: url, NEXT_PUBLIC_SUPABASE_ANON_KEY: key } = process.env
+          let endpoint
+          try { endpoint = new URL(url) } catch { /* handled below */ }
+          if (endpoint?.protocol !== 'https:' || endpoint.username || endpoint.password || !key?.trim()) {
+            throw new Error('Set the public HTTPS Supabase URL and public client key in the selected GitHub environment.')
+          }
+          if (key.startsWith('sb_secret_')) throw new Error('The build requires a public Supabase client key.')
+          if (key.startsWith('eyJ')) {
+            let role
+            try { role = JSON.parse(Buffer.from(key.split('.')[1], 'base64url')).role } catch { /* handled below */ }
+            if (role !== 'anon') throw new Error('A legacy Supabase JWT used in the build must have the anon role.')
+          } else if (!key.startsWith('sb_publishable_')) {
+            throw new Error('The Supabase key must be a publishable key or legacy anon JWT.')
+          }
+          NODE
+
+      - name: Install and check
+        run: |
+          npm ci --include=dev
+          npm run lint -- --max-warnings=0
+          npx --no-install next typegen
+          npx --no-install tsc --noEmit
+
+      - name: Build, package, and smoke-test the extracted release
+        env:
+          RELEASE_TARGET: ${{ inputs.target }}
+        run: |
+          npm run build
+          npm run package:standalone
+          mkdir -p build/artifacts
+          extracted="$(mktemp -d "$RUNNER_TEMP/maintflow.XXXXXX")"
+          name="maintflow-${RELEASE_TARGET}-${GITHUB_SHA}-linux-$(node -p 'process.arch').tar.gz"
+          tar -C build/standalone-release -czf "build/artifacts/$name" .
+          (cd build/artifacts && sha256sum "$name" > "$name.sha256")
+          tar -xzf "build/artifacts/$name" -C "$extracted"
+          node deployment/smoke-standalone.mjs "$extracted"
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: maintflow-${{ inputs.target }}-${{ github.sha }}-linux
+          path: build/artifacts/
+          if-no-files-found: error
+          retention-days: 14
