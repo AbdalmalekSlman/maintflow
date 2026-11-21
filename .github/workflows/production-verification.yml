@@ -1,0 +1,100 @@
+name: Verify MaintFlow production package
+
+on:
+  push:
+    branches: [feature/employee-number-auth]
+    paths: ['.github/workflows/production-verification.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: maintflow-verify-production
+    timeout-minutes: 20
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      RELEASE_TARGET: production
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Verify production target and read-only Auth settings
+        run: |
+          node --input-type=module - <<'NODE'
+          const { NEXT_PUBLIC_SUPABASE_URL: url, NEXT_PUBLIC_SUPABASE_ANON_KEY: key } = process.env
+          if (process.platform !== 'linux' || process.arch !== 'x64' || process.versions.node.split('.')[0] !== '24') {
+            throw new Error('Expected Linux x64 and Node.js 24')
+          }
+          if (url !== 'https://tkofnsyqywhixuotbiet.supabase.co' || !key?.startsWith('sb_publishable_')) {
+            throw new Error('Expected the production URL and modern publishable key')
+          }
+          const response = await fetch(url + '/auth/v1/settings', {
+            headers: { apikey: key }, signal: AbortSignal.timeout(10000),
+          })
+          if (!response.ok) throw new Error('Production rejected the public configuration')
+          const settings = await response.json()
+          if (settings.disable_signup !== true || settings.external?.email !== true ||
+              settings.external?.anonymous_users !== false) {
+            throw new Error('Unexpected production Auth settings')
+          }
+          NODE
+      - name: Run quality and service checks
+        run: |
+          npm ci --include=dev
+          npm run lint -- --max-warnings=0
+          npx --no-install next typegen
+          npx --no-install tsc --noEmit
+          python3 -B -m unittest discover -s deployment/pull -p test_deploy.py
+          systemd-analyze verify --man=no --recursive-errors=no deployment/pull/*.service
+      - name: Build, validate and smoke-test standalone package
+        run: |
+          npm run build
+          npm run package:standalone
+          mkdir -p build/artifacts
+          tar -C build/standalone-release -czf build/artifacts/maintflow.tar.gz .
+          (cd build/artifacts && sha256sum maintflow.tar.gz > SHA256SUMS && sha256sum -c SHA256SUMS)
+          extracted="$(mktemp -d "$RUNNER_TEMP/maintflow.XXXXXX")"
+          PYTHONPATH=deployment/pull python3 -B - "$extracted" <<'PY'
+          import hashlib, json, os, sys
+          from pathlib import Path
+          from deploy_release import NONPRODUCTION_PROJECTS, health_marker, unpack, validate_metadata
+
+          destination = Path(sys.argv[1])
+          unpack(Path("build/artifacts/maintflow.tar.gz"), destination)
+          metadata = json.loads((destination / "release.json").read_text())
+          validate_metadata(metadata, os.environ["GITHUB_SHA"], os.environ["NEXT_PUBLIC_SUPABASE_URL"])
+          health_marker(destination)
+          key_digest = hashlib.sha256(os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"].encode()).hexdigest()
+          if metadata["publicKeySha256"] != key_digest:
+              raise SystemExit("Packaged public key digest does not match")
+          blocked = tuple(ref.encode() for ref in NONPRODUCTION_PROJECTS)
+          for file in destination.rglob("*"):
+              if not file.is_file():
+                  continue
+              payload = file.read_bytes()
+              if any(ref in payload for ref in blocked):
+                  raise SystemExit("Nonproduction project reference found in package")
+          PY
+          SKIP_AUTH_ORIGIN_SMOKE=1 node deployment/smoke-standalone.mjs "$extracted"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: maintflow-production-verification-${{ github.sha }}-linux
+          path: build/artifacts/
+          if-no-files-found: error
+          retention-days: 7
+
+  approval-check:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: maintflow-review-test
+    timeout-minutes: 2
+    steps:
+      - run: printf '%s\n' 'The disposable approval check ran. This job has no publishing capability.'
