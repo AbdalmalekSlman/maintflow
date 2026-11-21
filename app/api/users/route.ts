@@ -10,13 +10,18 @@ export async function POST(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const { data: me } = await supabase.from('users').select('role').eq('id', user.id).single()
-  if (me?.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const { data: me } = await supabase.from('users').select('role, must_change_password').eq('id', user.id).single()
+  if (me?.role !== 'admin' || me.must_change_password) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   // 2. Validate input (reject bad roles instead of defaulting)
   const body = await request.json().catch(() => null)
-  const { email, password, full_name, role } = body ?? {}
-  if (typeof email !== 'string' || !/^\S+@\S+\.\S+$/.test(email) ||
+  const { employee_number, email, password, full_name, role } = body ?? {}
+
+const validEmployeeNumber =
+  typeof employee_number === 'string' &&
+  /^[1-9][0-9]*$/.test(employee_number) &&
+  employee_number.length <= 20
+  if (!validEmployeeNumber || typeof email !== 'string' || !/^\S+@\S+\.\S+$/.test(email) ||
       typeof password !== 'string' || password.length < 8 ||
       typeof full_name !== 'string' || !full_name.trim() ||
       !ROLES.includes(role)) {
@@ -35,11 +40,50 @@ export async function POST(request: Request) {
 
   // 3. Write to users (the table RLS actually reads)
   const { error: pErr } = await admin.from('users')
-    .insert({ id: data.user.id, email, full_name: full_name.trim(), role })
+    .insert({
+  id: data.user.id,
+  employee_number,
+  email,
+  full_name: full_name.trim(),
+  role,
+  must_change_password: true,
+})
   if (pErr) {
+  console.error('User profile creation failed', {
+    code: pErr.code,
+  })
+
+  // Attempt to remove the Auth account because its
+  // MaintFlow profile could not be created.
+  const { error: cleanupError } =
     await admin.auth.admin.deleteUser(data.user.id)
-    return NextResponse.json({ error: 'Profile creation failed: ' + pErr.message }, { status: 400 })
+
+  if (cleanupError) {
+    console.error('Auth account cleanup failed', {
+      userId: data.user.id,
+      error: cleanupError.message,
+    })
+
+    // Report incomplete cleanup for Admin investigation.
+    return NextResponse.json(
+      {
+        error:
+          'User creation failed and automatic cleanup was unsuccessful. Contact the system administrator.',
+      },
+      { status: 500 }
+    )
   }
+
+  return NextResponse.json(
+    {
+      error:
+        pErr.code === '23505'
+          ? 'Employee number or email already exists.'
+          : 'User profile creation failed. The new login account was removed.',
+    },
+    { status: pErr.code === '23505' ? 409 : 500 }
+  )
+}
   return NextResponse.json({ success: true, userId: data.user.id })
 }
 
@@ -64,11 +108,11 @@ export async function DELETE(request: Request) {
     // 2. Verify Admin role
     const { data: me, error: roleError } = await supabase
       .from('users')
-      .select('role')
+      .select('role, must_change_password')
       .eq('id', user.id)
       .single()
 
-    if (roleError || me?.role !== 'admin') {
+    if (roleError || me?.role !== 'admin' || me.must_change_password) {
       return NextResponse.json(
         { error: 'Forbidden: Admin access required' },
         { status: 403 }
@@ -146,7 +190,7 @@ export async function DELETE(request: Request) {
         .from('work_orders')
         .select('id', { count: 'exact', head: true })
         .eq('assigned_to', targetUserId)
-        .neq('status', 'verified_closed')
+        .or('status.is.null,status.neq.verified_closed')
 
     if (assignedError) {
       return NextResponse.json(
@@ -160,7 +204,7 @@ export async function DELETE(request: Request) {
         .from('work_orders')
         .select('id', { count: 'exact', head: true })
         .eq('team_leader_id', targetUserId)
-        .neq('status', 'verified_closed')
+        .or('status.is.null,status.neq.verified_closed')
 
     if (leaderError) {
       return NextResponse.json(

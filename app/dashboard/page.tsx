@@ -30,10 +30,10 @@ export default function DashboardPage() {
         .single()
 
       if (data) {
-        setProfile(data as UserProfile)
-      } else {
-        setProfile({ full_name: user.email || 'User', role: 'technician' })
-      }
+  setProfile(data as UserProfile)
+} else {
+  setProfile(null)
+}
       setLoading(false)
     }
 
@@ -46,9 +46,21 @@ export default function DashboardPage() {
     router.refresh()
   }
 
-  if (loading || !profile) {
-    return <div className="min-h-screen flex items-center justify-center text-slate-500 font-medium">Loading MaintFlow Dashboard...</div>
-  }
+ if (loading) {
+  return (
+    <div className="min-h-screen flex items-center justify-center text-slate-500">
+      Loading MaintFlow Dashboard...
+    </div>
+  )
+}
+
+if (!profile) {
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6 text-red-700">
+      Unable to verify your account. Please refresh or contact the Admin.
+    </div>
+  )
+}
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -158,7 +170,47 @@ export default function DashboardPage() {
               <p className="text-sm text-slate-600">View and manage plant personnel across the 7-tier hierarchy.</p>
             </div>
           )}
+{/* 7. My Account - All authenticated users */}
+<button
+  type="button"
+  onClick={() => router.push('/dashboard/account')}
+  className="w-full text-left bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:border-blue-600 hover:shadow-md focus-visible:outline-2 focus-visible:outline-blue-600 cursor-pointer transition-all space-y-2"
+>
+  <div className="flex items-center justify-between">
+    <h2 className="font-bold text-slate-900 text-lg">
+      My Account
+    </h2>
+    <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded font-medium">
+      All Users
+    </span>
+  </div>
+  <p className="text-sm text-slate-500">
+    View your account information and change your password.
+  </p>
+</button>
 
+{/* 8. Password Reset Requests - Admin only */}
+{profile.role === 'admin' && (
+  <button
+    type="button"
+    onClick={() =>
+      router.push('/dashboard/password-reset-requests')
+    }
+    className="w-full text-left bg-white p-6 rounded-xl border border-amber-200 shadow-sm hover:border-amber-500 hover:shadow-md focus-visible:outline-2 focus-visible:outline-amber-600 cursor-pointer transition-all space-y-2"
+  >
+    <div className="flex items-center justify-between">
+      <h2 className="font-bold text-slate-900 text-lg">
+        Password Reset Requests
+      </h2>
+      <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded font-medium">
+        Admin Only
+      </span>
+    </div>
+    <p className="text-sm text-slate-500">
+      Review employee requests, approve resets, and issue temporary passwords.
+    </p>
+  </button>
+)}
         </div>
       </main>
     </div>

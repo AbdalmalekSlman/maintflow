@@ -134,14 +134,11 @@ export default function PreventiveMaintenancePage() {
   const [editNextDueDate, setEditNextDueDate] = useState('')
   const [savingScheduleEdit, setSavingScheduleEdit] = useState(false)
 
-  // PM-to-WO generation state (PM-07)
-  const [generatingWOId, setGeneratingWOId] = useState<string | null>(null)
-
   const router = useRouter()
 
   const canCompletePM = Boolean(userRole && ROLES_ALLOWED_TO_COMPLETE_PM.includes(userRole))
   const canEditScheduleInterval = userRole === 'superintendent' || userRole === 'admin'
-  const canGenerateWO = Boolean(userRole && userRole !== 'manager')
+  const canGenerateWO = Boolean(userRole && Permissions.canCreateWorkOrder(userRole))
 
   const overdueCount = schedules.filter((pm) => getDueUrgency(pm.next_due_date, pm.status) === 'overdue').length
   const upcomingCount = schedules.filter((pm) => getDueUrgency(pm.next_due_date, pm.status) === 'upcoming').length
@@ -235,6 +232,7 @@ export default function PreventiveMaintenancePage() {
       .from('pm_schedules')
       .update({ status: 'active' })
       .eq('id', scheduleId)
+      .eq('status', 'pending_approval')
       .select('id')
 
     if (error) {
@@ -269,6 +267,9 @@ export default function PreventiveMaintenancePage() {
         status: 'active',
       })
       .eq('id', schedule.id)
+      .eq('status', 'active')
+      .eq('next_due_date', schedule.next_due_date)
+      .eq('frequency', schedule.frequency)
       .select('id')
 
     if (error) {
@@ -282,8 +283,9 @@ export default function PreventiveMaintenancePage() {
     if (!data || data.length === 0) {
       setActionMessage({
         type: 'error',
-        text: 'Permission denied or PM schedule no longer available (0 rows updated).',
+        text: 'This schedule changed or is no longer available. Review the current schedule before completing it.',
       })
+      await fetchData()
       return
     }
 
@@ -365,61 +367,14 @@ export default function PreventiveMaintenancePage() {
     }
   }
 
-  const handleGenerateWorkOrder = async (pm: PMSchedule) => {
-    setActionMessage(null)
+  const handleGenerateWorkOrder = (pm: PMSchedule) => {
+    if (!canGenerateWO) return
 
-    if (!canGenerateWO) {
-      setActionMessage({
-        type: 'error',
-        text: `Permission denied: role "${userRole || 'unknown'}" cannot generate work orders.`,
-      })
-      return
-    }
-
-    setGeneratingWOId(pm.id)
-
-    try {
-      const urgency = getDueUrgency(pm.next_due_date, pm.status)
-      const priority = urgency === 'overdue' ? 'high' : 'medium'
-
-      const { data, error } = await supabase
-        .from('work_orders')
-        .insert([
-          {
-            title: `PM: ${pm.title}`,
-            description:
-              pm.description ||
-              `Preventive maintenance (${pm.frequency}) scheduled for ${pm.next_due_date}`,
-            equipment_id: pm.equipment_id || null,
-            status: 'open',
-            priority,
-          },
-        ])
-        .select('id')
-
-      if (error) {
-        setActionMessage({
-          type: 'error',
-          text: `Failed to generate work order: ${error.message}`,
-        })
-        return
-      }
-
-      if (!data || data.length === 0) {
-        setActionMessage({
-          type: 'error',
-          text: 'Unable to create work order: permission denied or insert blocked (0 rows returned).',
-        })
-        return
-      }
-
-      setActionMessage({
-        type: 'success',
-        text: `Generated open work order for "${pm.title}" (${priority.toUpperCase()} priority).`,
-      })
-    } finally {
-      setGeneratingWOId(null)
-    }
+    const params = new URLSearchParams({
+      pmSchedule: pm.id,
+      pmPriority: getDueUrgency(pm.next_due_date, pm.status) === 'overdue' ? 'high' : 'medium',
+    })
+    router.push(`/dashboard/work-orders?${params}`)
   }
 
   return (
@@ -680,11 +635,10 @@ export default function PreventiveMaintenancePage() {
                                 {canGenerateWO && (
                                   <button
                                     type="button"
-                                    disabled={generatingWOId === pm.id}
                                     onClick={() => handleGenerateWorkOrder(pm)}
                                     className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium transition disabled:opacity-50"
                                   >
-                                    {generatingWOId === pm.id ? 'Creating WO...' : 'Create WO'}
+                                    Create WO
                                   </button>
                                 )}
 

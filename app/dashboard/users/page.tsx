@@ -18,6 +18,7 @@ export default function UserManagementPage() {
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   // New user form state
+  const [employeeNumber, setEmployeeNumber] = useState('')
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -64,15 +65,21 @@ export default function UserManagementPage() {
       const res = await fetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, full_name: fullName, role }),
+        body: JSON.stringify({
+  employee_number: employeeNumber.trim(),
+  email,
+  password,
+  full_name: fullName,
+  role,
+}),
       })
-
-      const data = await res.json()
+const data = await res.json()
 
       if (!res.ok) {
         alert('Error creating user: ' + (data.error || 'Unknown error'))
       } else {
         alert('User successfully created and assigned!')
+        setEmployeeNumber('')
         setFullName('')
         setEmail('')
         setPassword('')
@@ -212,6 +219,22 @@ const handleDeleteUser = async (target: UserProfile) => {
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
+            <div>
+  <label className="block text-xs font-medium text-slate-600 mb-1">
+    Employee Number
+  </label>
+  <input
+    type="text"
+    inputMode="numeric"
+    pattern="[1-9][0-9]*"
+    maxLength={20}
+    required
+    value={employeeNumber}
+    onChange={(e) => setEmployeeNumber(e.target.value)}
+    placeholder="Employee Number"
+    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900"
+  />
+</div>
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Email Address</label>
               <input

@@ -189,7 +189,7 @@ useEffect(() => {
     setSavingEdit(true)
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('equipment')
         .update({
           name: trimmedName,
@@ -198,6 +198,8 @@ useEffect(() => {
           status: editStatus,
         })
         .eq('id', id)
+        .select('id')
+        .maybeSingle()
 
       if (error) {
         if (error.code === '23505') {
@@ -209,6 +211,12 @@ useEffect(() => {
         } else {
           alert('Error updating equipment: ' + error.message)
         }
+        return
+      }
+
+      if (!data) {
+        alert('Equipment is no longer available or you do not have permission to edit it.')
+        await fetchEquipment()
         return
       }
 
