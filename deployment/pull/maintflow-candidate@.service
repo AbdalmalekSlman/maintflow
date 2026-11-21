@@ -1,0 +1,19 @@
+[Unit]
+Description=Private MaintFlow release validation (%i)
+
+[Service]
+Type=simple
+User=maintflow
+Group=maintflow
+WorkingDirectory=/srv/maintflow/releases/%i
+EnvironmentFile=/etc/maintflow/production.env
+ExecStartPre=/usr/bin/python3 -B /usr/local/lib/maintflow/deploy_release.py --verify-runtime /srv/maintflow/releases/%i
+ExecStart=/usr/bin/env NODE_ENV=production HOSTNAME=127.0.0.1 PORT=18100 /opt/node24/bin/node server.js
+MemoryAccounting=true
+MemoryMax=200000000
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/maintflow/releases/%i/.next/cache
+UMask=0027

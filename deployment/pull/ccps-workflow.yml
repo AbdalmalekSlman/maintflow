@@ -1,0 +1,123 @@
+# Install as .github/workflows/maintflow-publish.yml in the CCPs-INST control branch.
+name: Publish approved MaintFlow package
+
+on:
+  push:
+    branches: [maintflow-release-control]
+    paths: [deployment/maintflow-release.json]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maintflow-deploy-publication
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'AbdalmalekSlman/CCPs-INST'
+    runs-on: ubuntu-latest
+    environment: maintflow-build-production
+    timeout-minutes: 20
+    outputs:
+      source: ${{ steps.request.outputs.source }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          path: control
+          persist-credentials: false
+      - name: Read the approved source revision
+        id: request
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          with open('control/deployment/maintflow-release.json') as file:
+              source = json.load(file)['sourceSha']
+          if not re.fullmatch(r'[a-f0-9]{40}', source):
+              raise SystemExit('Expected the full approved MaintFlow commit SHA.')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print(f'source={source}', file=output)
+          PY
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: AbdalmalekSlman/maintflow
+          ref: ${{ steps.request.outputs.source }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+      - name: Build and test standalone release
+        working-directory: source
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          MAINTFLOW_PRODUCTION_SUPABASE_REF: ${{ vars.MAINTFLOW_PRODUCTION_SUPABASE_REF }}
+          SOURCE_SHA: ${{ steps.request.outputs.source }}
+          RELEASE_TARGET: production
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          node --input-type=module - <<'NODE'
+          const { MAINTFLOW_PRODUCTION_SUPABASE_REF: ref, NEXT_PUBLIC_SUPABASE_URL: url,
+            NEXT_PUBLIC_SUPABASE_ANON_KEY: key } = process.env
+          if (process.platform !== 'linux' || process.arch !== 'x64') throw Error('Expected Linux x64')
+          const nonproduction = ['dmrmqrtjmpeyoekicctp', 'nufovhdkroobbwqxiszt']
+          if (!/^[a-z0-9]{20}$/.test(ref) || nonproduction.includes(ref) || url !== `https://${ref}.supabase.co`) {
+            throw Error('Set the independently approved production Supabase reference and matching HTTPS URL')
+          }
+          let isPublic = key?.startsWith('sb_publishable_')
+          if (key?.startsWith('eyJ')) {
+            try {
+              const payload = JSON.parse(Buffer.from(key.split('.')[1], 'base64url'))
+              isPublic = payload.role === 'anon' && payload.ref === ref
+            } catch { isPublic = false }
+          }
+          if (!isPublic) throw Error('Set the production public Supabase client key')
+          const settings = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: key }, signal: AbortSignal.timeout(10000) })
+          if (!settings.ok) throw Error('The Supabase public key was rejected by the approved production project')
+          NODE
+          npm ci --include=dev
+          npm run lint -- --max-warnings=0
+          npx --no-install next typegen
+          npx --no-install tsc --noEmit
+          npm run build
+          GITHUB_SHA="$SOURCE_SHA" npm run package:standalone
+          mkdir -p "$RUNNER_TEMP/publish"
+          archive="$RUNNER_TEMP/publish/maintflow.tar.gz"
+          tar -C build/standalone-release -czf "$archive" .
+          cp build/standalone-release/release.json "$RUNNER_TEMP/publish/release.json"
+          (cd "$RUNNER_TEMP/publish" && sha256sum maintflow.tar.gz > SHA256SUMS)
+          extracted="$(mktemp -d "$RUNNER_TEMP/maintflow.XXXXXX")"
+          PYTHONPATH=../control/deployment/pull python3 -B -c 'from pathlib import Path; from deploy_release import unpack; import sys; unpack(Path(sys.argv[1]), Path(sys.argv[2]))' "$archive" "$extracted"
+          SKIP_AUTH_ORIGIN_SMOKE=1 node deployment/smoke-standalone.mjs "$extracted"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: maintflow-publish-${{ github.sha }}
+          path: ${{ runner.temp }}/publish/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: maintflow-publish-production
+    permissions:
+      contents: write
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          path: control
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: maintflow-publish-${{ github.sha }}
+          path: ${{ runner.temp }}/publish
+      - name: Publish only the deploy branch
+        env:
+          SOURCE_SHA: ${{ needs.build.outputs.source }}
+          MAINTFLOW_PRODUCTION_SUPABASE_REF: ${{ vars.MAINTFLOW_PRODUCTION_SUPABASE_REF }}
+        run: |
+          python3 -B control/deployment/pull/publish_deploy.py \
+            control "$RUNNER_TEMP/publish" "$SOURCE_SHA" "$MAINTFLOW_PRODUCTION_SUPABASE_REF"

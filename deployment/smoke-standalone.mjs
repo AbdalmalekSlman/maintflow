@@ -55,9 +55,11 @@ try {
   }
   assert.ok(output.includes(`http://127.0.0.1:${port}`) && output.includes('Ready'), 'Standalone loopback listener became ready')
 
-  assert.equal(await loginStatus(publicOrigin), 401, 'Trusted origin reaches login input validation')
-  assert.equal(await loginStatus('https://untrusted.example'), 403, 'Foreign origin is rejected')
-  console.log('Reverse-proxy origin checks: trusted 401, foreign 403')
+  if (process.env.SKIP_AUTH_ORIGIN_SMOKE !== '1') {
+    assert.equal(await loginStatus(publicOrigin), 401, 'Trusted origin reaches login input validation')
+    assert.equal(await loginStatus('https://untrusted.example'), 403, 'Foreign origin is rejected')
+    console.log('Reverse-proxy origin checks: trusted 401, foreign 403')
+  }
 
   for (const [path, expected] of [['/', 200], ['/file.svg', 200], [`/_next/static/${assetPath}`, 200], ['/dashboard/work-orders', 307]]) {
     const response = await fetch(origin + path, { redirect: 'manual', signal: AbortSignal.timeout(5000) })

@@ -1,0 +1,20 @@
+[Unit]
+Description=Private MaintFlow staging rehearsal
+After=network-online.target
+
+[Service]
+Type=simple
+User=maintflow-rehearsal
+Group=maintflow-rehearsal
+WorkingDirectory=/srv/maintflow-rehearsal/current
+EnvironmentFile=/etc/maintflow/rehearsal.env
+ExecStartPre=/usr/bin/python3 -B /usr/local/lib/maintflow/deploy_release.py --verify-rehearsal /srv/maintflow-rehearsal/current
+ExecStart=/usr/bin/env NODE_ENV=production HOSTNAME=127.0.0.1 PORT=18100 /opt/node24/bin/node server.js
+MemoryAccounting=true
+MemoryMax=700000000
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/maintflow-rehearsal/current/.next/cache
+UMask=0027

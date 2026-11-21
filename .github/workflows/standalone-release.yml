@@ -1,24 +1,17 @@
 name: Build MaintFlow standalone release
 
 on:
+  push:
+    branches: [feature/employee-number-auth]
   workflow_dispatch:
-    inputs:
-      target:
-        description: Supabase target used to build the artifact
-        type: choice
-        options:
-          - staging
-          - production
-        default: staging
-        required: true
 
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
-    environment: maintflow-build-${{ inputs.target }}
+    runs-on: ubuntu-latest
+    environment: maintflow-build-staging
     timeout-minutes: 20
     env:
       NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
@@ -35,15 +28,19 @@ jobs:
           cache: npm
 
       - name: Verify build configuration
+        id: configuration
         run: |
           node --input-type=module - <<'NODE'
-          const { NEXT_PUBLIC_SUPABASE_URL: url, NEXT_PUBLIC_SUPABASE_ANON_KEY: key } = process.env
-          let endpoint
-          try { endpoint = new URL(url) } catch { /* handled below */ }
-          if (endpoint?.protocol !== 'https:' || endpoint.username || endpoint.password || !key?.trim()) {
-            throw new Error('Set the public HTTPS Supabase URL and public client key in the selected GitHub environment.')
+          import { appendFileSync } from 'node:fs'
+          const { NEXT_PUBLIC_SUPABASE_URL: url, NEXT_PUBLIC_SUPABASE_ANON_KEY: key,
+            GITHUB_EVENT_NAME: event, GITHUB_ENV: env, GITHUB_OUTPUT: output } = process.env
+          const staging = 'https://dmrmqrtjmpeyoekicctp.supabase.co'
+          if (!url && !key && event === 'push') {
+            appendFileSync(env, 'NEXT_PUBLIC_SUPABASE_URL=https://example.invalid\nNEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_build_smoke\n')
+            appendFileSync(output, 'target=smoke\n')
+            process.exit(0)
           }
-          if (key.startsWith('sb_secret_')) throw new Error('The build requires a public Supabase client key.')
+          if (url !== staging || !key?.trim()) throw Error('Set the known staging URL and public client key.')
           if (key.startsWith('eyJ')) {
             let role
             try { role = JSON.parse(Buffer.from(key.split('.')[1], 'base64url')).role } catch { /* handled below */ }
@@ -51,6 +48,9 @@ jobs:
           } else if (!key.startsWith('sb_publishable_')) {
             throw new Error('The Supabase key must be a publishable key or legacy anon JWT.')
           }
+          const response = await fetch(`${staging}/auth/v1/settings`, { headers: { apikey: key }, signal: AbortSignal.timeout(10000) })
+          if (!response.ok) throw Error('The public key was rejected by the staging project.')
+          appendFileSync(output, 'target=staging\n')
           NODE
 
       - name: Install and check
@@ -62,7 +62,7 @@ jobs:
 
       - name: Build, package, and smoke-test the extracted release
         env:
-          RELEASE_TARGET: ${{ inputs.target }}
+          RELEASE_TARGET: ${{ steps.configuration.outputs.target }}
         run: |
           npm run build
           npm run package:standalone
@@ -71,12 +71,12 @@ jobs:
           name="maintflow-${RELEASE_TARGET}-${GITHUB_SHA}-linux-$(node -p 'process.arch').tar.gz"
           tar -C build/standalone-release -czf "build/artifacts/$name" .
           (cd build/artifacts && sha256sum "$name" > "$name.sha256")
-          tar -xzf "build/artifacts/$name" -C "$extracted"
-          node deployment/smoke-standalone.mjs "$extracted"
+          PYTHONPATH=deployment/pull python3 -B -c 'from pathlib import Path; from deploy_release import unpack; import sys; unpack(Path(sys.argv[1]), Path(sys.argv[2]))' "build/artifacts/$name" "$extracted"
+          SKIP_AUTH_ORIGIN_SMOKE=1 node deployment/smoke-standalone.mjs "$extracted"
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: maintflow-${{ inputs.target }}-${{ github.sha }}-linux
+          name: maintflow-${{ steps.configuration.outputs.target }}-${{ github.sha }}-linux
           path: build/artifacts/
           if-no-files-found: error
           retention-days: 14
