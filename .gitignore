@@ -19,6 +19,8 @@
 
 # production
 /build
+/.git-backup-local/
+/supabase/.temp/
 
 # misc
 .DS_Store
