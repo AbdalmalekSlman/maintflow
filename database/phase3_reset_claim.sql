@@ -23,8 +23,14 @@ BEGIN
         admin_id = p_admin_id,
         reset_started_at = NOW()
     WHERE r.id = p_request_id
-      AND r.status = 'approved'
       AND r.user_id IS NOT NULL
+      AND (
+          r.status = 'approved'
+          OR (
+              r.status = 'processing'
+              AND r.reset_started_at < NOW() - INTERVAL '5 minutes'
+          )
+      )
     RETURNING r.user_id, r.employee_number;
 END;
 $$;
