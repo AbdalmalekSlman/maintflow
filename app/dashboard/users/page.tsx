@@ -73,13 +73,13 @@ export default function UserManagementPage() {
   role,
 }),
       })
-setEmployeeNumber('')
-      const data = await res.json()
+const data = await res.json()
 
       if (!res.ok) {
         alert('Error creating user: ' + (data.error || 'Unknown error'))
       } else {
         alert('User successfully created and assigned!')
+        setEmployeeNumber('')
         setFullName('')
         setEmail('')
         setPassword('')

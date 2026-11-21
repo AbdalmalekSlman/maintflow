@@ -30,11 +30,9 @@ export default function PasswordResetRequestsPage() {
   password: string
 } | null>(null)
 const [passwordCopied, setPasswordCopied] = useState(false)
+  const [now, setNow] = useState<number | null>(null)
 
   const fetchRequests = useCallback(async () => {
-    setLoading(true)
-    setError('')
-
     try {
       const response = await fetch(
         '/api/admin/password-reset-requests',
@@ -48,6 +46,7 @@ const [passwordCopied, setPasswordCopied] = useState(false)
       }
 
       setRequests(result.requests ?? [])
+      setNow(Date.now())
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Unexpected error'
@@ -65,8 +64,16 @@ const [passwordCopied, setPasswordCopied] = useState(false)
       return
     }
 
-    void fetchRequests()
+    const timer = window.setTimeout(() => void fetchRequests(), 0)
+    return () => window.clearTimeout(timer)
   }, [authLoading, role, router, fetchRequests])
+
+  useEffect(() => {
+    if (!requests.some(request => request.status === 'processing')) return
+
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [requests])
 
   async function reviewRequest(
     requestId: string,
@@ -214,7 +221,11 @@ setPasswordCopied(false)
           </div>
 
           <button
-            onClick={() => void fetchRequests()}
+            onClick={() => {
+              setLoading(true)
+              setError('')
+              void fetchRequests()
+            }}
             disabled={loading || processingId !== null}
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 bg-white disabled:opacity-50"
           >
@@ -295,7 +306,7 @@ setPasswordCopied(false)
         onClick={() => setTemporaryCredentials(null)}
         className="rounded-lg border border-amber-400 px-4 py-2 text-sm font-medium text-amber-950 cursor-pointer hover:bg-amber-100 active:scale-95 transition-all duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600"
       >
-        I've Saved It – Close
+        I&apos;ve Saved It – Close
       </button>
     </div>
   </div>
@@ -386,7 +397,8 @@ setPasswordCopied(false)
       processingId !== null ||
       temporaryCredentials !== null ||
       !request.reset_started_at ||
-      Date.now() - new Date(
+      now === null ||
+      now - new Date(
         request.reset_started_at
       ).getTime() < 5 * 60 * 1000
     }
@@ -410,7 +422,6 @@ setPasswordCopied(false)
 
         <p className="text-xs text-slate-500">
           Approving a request does not change the employee password.
-          Password resetting will be added in the next step.
           This view displays the most recent 100 requests.
         </p>
       </div>

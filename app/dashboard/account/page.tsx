@@ -127,9 +127,8 @@ export default function MyAccountPage() {
     : previous
   )
 
-  // Full navigation ensures the dashboard loads
-  // with the latest Supabase session and account status.
-  window.location.assign('/dashboard')
+  router.replace('/dashboard')
+  router.refresh()
 }
     } catch {
       setError('Connection error. Please try again.')

@@ -49,9 +49,41 @@ const validEmployeeNumber =
   must_change_password: true,
 })
   if (pErr) {
+  console.error('User profile creation failed', {
+    code: pErr.code,
+  })
+
+  // Attempt to remove the Auth account because its
+  // MaintFlow profile could not be created.
+  const { error: cleanupError } =
     await admin.auth.admin.deleteUser(data.user.id)
-    return NextResponse.json({ error: 'Profile creation failed: ' + pErr.message }, { status: 400 })
+
+  if (cleanupError) {
+    console.error('Auth account cleanup failed', {
+      userId: data.user.id,
+      error: cleanupError.message,
+    })
+
+    // Report incomplete cleanup for Admin investigation.
+    return NextResponse.json(
+      {
+        error:
+          'User creation failed and automatic cleanup was unsuccessful. Contact the system administrator.',
+      },
+      { status: 500 }
+    )
   }
+
+  return NextResponse.json(
+    {
+      error:
+        pErr.code === '23505'
+          ? 'Employee number or email already exists.'
+          : 'User profile creation failed. The new login account was removed.',
+    },
+    { status: pErr.code === '23505' ? 409 : 500 }
+  )
+}
   return NextResponse.json({ success: true, userId: data.user.id })
 }
 

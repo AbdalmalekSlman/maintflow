@@ -58,7 +58,36 @@ export async function POST(request: Request) {
         400
       )
     }
+// Maximum 3 reset requests per employee number per hour.
+// The identifier is HMAC-hashed by consumeRateLimit.
+const rateLimit = await consumeRateLimit(
+  'password-reset-request',
+  employeeNumber,
+  3,
+  60 * 60
+)
 
+if (rateLimit.error) {
+  return respond(
+    { error: 'Unable to process the request right now.' },
+    503
+  )
+}
+
+if (!rateLimit.allowed) {
+  return NextResponse.json(
+    {
+      error: 'Too many requests. Please try again later.',
+    },
+    {
+      status: 429,
+      headers: {
+        ...headers,
+        'Retry-After': '3600',
+      },
+    }
+  )
+}
     const admin = createAdminClient()
 
     // Use the server-only Admin client.
