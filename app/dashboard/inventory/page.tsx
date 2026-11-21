@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Permissions, PlantRole } from '@/lib/permissions'
+import { addInventoryItem } from '@/app/actions/inventory'
 interface InventoryItem {
   id: string
   part_name: string
@@ -65,25 +66,28 @@ export default function InventoryPage() {
     e.preventDefault()
     setSubmitting(true)
 
-    const { error } = await supabase.from('inventory').insert([
-      {
-        part_name: partName,
-        part_number: partNumber,
-        stock_quantity: parseInt(stockQuantity, 10) || 0,
-        min_threshold: parseInt(minThreshold, 10) || 5,
-      },
-    ])
+    const fields = new FormData()
+    fields.set('part_name', partName)
+    fields.set('part_number', partNumber)
+    fields.set('stock_quantity', stockQuantity)
+    fields.set('min_threshold', minThreshold)
 
-    if (error) {
-      alert('Error adding part: ' + error.message)
-    } else {
+    try {
+      const result = await addInventoryItem(fields)
+      if (!result.success) {
+        alert('Error adding part: ' + result.error)
+        return
+      }
       setPartName('')
       setPartNumber('')
       setStockQuantity('10')
       setMinThreshold('5')
-      fetchInventory()
+      await fetchInventory()
+    } catch {
+      alert('Unable to add the spare part. Please try again.')
+    } finally {
+      setSubmitting(false)
     }
-    setSubmitting(false)
   }
 
   
