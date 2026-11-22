@@ -1,0 +1,30 @@
+[Unit]
+Description=MaintFlow standalone Next.js
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=maintflow
+Group=maintflow
+SupplementaryGroups=maintflow-cache
+WorkingDirectory=/srv/maintflow/current
+EnvironmentFile=/etc/maintflow/production.env
+ExecStartPre=/usr/bin/python3 -B /usr/local/lib/maintflow/deploy_release.py --verify-runtime /srv/maintflow/current
+ExecStart=/usr/bin/env NODE_ENV=production HOSTNAME=127.0.0.1 PORT=8100 /opt/node24/bin/node server.js
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=3
+MemoryAccounting=true
+MemoryMax=700000000
+CPUQuota=50%
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+InaccessiblePaths=/opt/ot_tracker /etc/ot_tracker.env /etc/ot_tracker_git
+ReadWritePaths=/srv/maintflow/current/.next/cache
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

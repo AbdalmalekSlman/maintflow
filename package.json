@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node build/standalone-release/start.mjs",
+    "package:standalone": "node deployment/package-standalone.mjs",
     "lint": "eslint"
   },
   "dependencies": {
@@ -13,10 +14,11 @@
     "@supabase/supabase-js": "^2.119.0",
     "next": "16.4.6",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
-    "@tailwindcss/turbopack": "4.3.3",
+    "@tailwindcss/postcss": "4.3.3",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

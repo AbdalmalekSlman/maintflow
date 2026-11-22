@@ -17,15 +17,17 @@ interface WorkOrder {
     name: string
     asset_tag: string
     location: string
-  }[] | null
+  } | null
 
   team_leader?: {
     full_name: string
-  }[] | null
+  } | null
 
   assignee?: {
     full_name: string
-  }[] | null
+  } | null
+  team_leader_id: string | null
+  assigned_to: string | null
 }
 
 interface InventoryPart {
@@ -61,11 +63,16 @@ const savingOutcomeRef = useRef(false)
   const router = useRouter()
 
   const isClosed = workOrder?.status === 'verified_closed'
+
+const isPendingReview =
+  workOrder?.status === 'completed_pending_review'
+
+const isEditingLocked = isClosed || isPendingReview
   const isReadOnly = userRole === 'manager' || userRole === 'stock_keeper'
   const canApproveClose =
     userRole === 'admin' || userRole === 'superintendent' || userRole === 'team_leader'
 const selectedPart = inventoryList.find((p) => p.id === selectedPartId)
-const equipment = workOrder?.equipment?.[0]
+const equipment = workOrder?.equipment
   const fetchWorkOrderDetails = useCallback(async () => {
     if (!workOrderId) return
 
@@ -90,23 +97,19 @@ const equipment = workOrder?.equipment?.[0]
     const { data: woData, error: woError } = await supabase
   .from('work_orders')
   .select(
-    'id, title, description, priority, status, outcome_notes, equipment:equipment_id(name, asset_tag, location), team_leader:team_leader_id(full_name), assignee:assigned_to(full_name)'
+    'id, title, description, priority, status, outcome_notes, team_leader_id, assigned_to, equipment:equipment_id(name, asset_tag, location), team_leader:team_leader_id(full_name), assignee:assigned_to(full_name)'
   )
   .eq('id', workOrderId)
   .single()
+  .overrideTypes<WorkOrder, { merge: false }>()
 
 if (woError || !woData) {
   setNotFound(true)
   setLoading(false)
   return
 }
-    if (!woData) {
-      alert('Work order not found in database.')
-      router.replace('/dashboard/work-orders')
-      return
-    }
-
-    setWorkOrder(woData as WorkOrder)
+    setNotFound(false)
+    setWorkOrder(woData)
     setOutcomeNotes(woData.outcome_notes || '')
 
     const { data: partsData } = await supabase
@@ -128,7 +131,7 @@ if (woError || !woData) {
     }
 
     setLoading(false)
-   }, [workOrderId, router])
+   }, [workOrderId])
 
 useEffect(() => {
   if (!workOrderId) return
@@ -146,7 +149,7 @@ useEffect(() => {
 
 const handleLogPart = async (e: React.FormEvent) => {
   e.preventDefault()
-  if (isReadOnly || isClosed || !selectedPartId) return
+  if (isReadOnly || isEditingLocked || !selectedPartId) return
 
   const rawQty = quantityUsed.trim()
   if (!/^\d+$/.test(rawQty)) {
@@ -187,12 +190,12 @@ const handleLogPart = async (e: React.FormEvent) => {
 }
 
  const handleSaveOutcome = async () => {
-  if (isReadOnly || !workOrder || savingOutcomeRef.current) return
-
-  if (workOrder.status === 'verified_closed') {
-    alert('This work order is already verified and closed and cannot be modified or reopened.')
-    return
-  }
+  if (
+  isReadOnly ||
+  isEditingLocked ||
+  !workOrder ||
+  savingOutcomeRef.current
+) return
 
   savingOutcomeRef.current = true
   setSavingOutcome(true)
@@ -200,26 +203,29 @@ const handleLogPart = async (e: React.FormEvent) => {
   try {
     const nextStatus = canApproveClose ? 'verified_closed' : 'completed_pending_review'
 
-    const { error } = await supabase
-      .from('work_orders')
-      .update({
-        outcome_notes: outcomeNotes.trim() || null,
-        status: nextStatus,
-        completed_at: new Date().toISOString(),
-      })
-      .eq('id', workOrderId)
-      .neq('status', 'verified_closed')
+    const { data, error } = await supabase
+  .from('work_orders')
+  .update({
+    outcome_notes: outcomeNotes.trim() || null,
+    status: nextStatus,
+    completed_at: new Date().toISOString(),
+  })
+  .eq('id', workOrderId)
+  .eq('status', workOrder.status)
+  .select('id')
+  .maybeSingle()
 
-    if (error) {
-      alert('Error saving notes: ' + error.message)
-    } else {
-      alert(
-        nextStatus === 'verified_closed'
-          ? 'Work order saved and marked as Verified Closed!'
-          : 'Work order marked as completed and pending review!'
-      )
-      await fetchWorkOrderDetails()
-    }
+    if (error || !data) {
+  alert(
+    error
+      ? `Error saving notes: ${error.message}`
+      : 'Work Order was not updated. Please refresh and try again.'
+  )
+  await fetchWorkOrderDetails()
+} else {
+  router.replace('/dashboard/work-orders')
+  router.refresh()
+}
   } finally {
     savingOutcomeRef.current = false
     setSavingOutcome(false)
@@ -297,13 +303,13 @@ if (notFound) {
             <div>
               <span className="text-xs text-slate-400 block uppercase font-semibold">Team Leader</span>
               <span className="text-sm font-medium text-slate-800 mt-1 block">
-                {workOrder?.team_leader?.[0]?.full_name || 'Unassigned'}
+                {workOrder?.team_leader?.full_name || (workOrder?.team_leader_id ? 'Assigned' : 'Unassigned')}
               </span>
             </div>
             <div>
               <span className="text-xs text-slate-400 block uppercase font-semibold">Technician</span>
               <span className="text-sm font-medium text-slate-800 mt-1 block">
-                {workOrder?.assignee?.[0]?.full_name || 'Unassigned'}
+                {workOrder?.assignee?.full_name || (workOrder?.assigned_to ? 'Assigned' : 'Unassigned')}
               </span>
             </div>
           </div>
@@ -339,14 +345,22 @@ if (notFound) {
 
         {/* Log Spare Parts Section */}
         {!isReadOnly && (
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+          <div
+  className={`p-6 rounded-xl border shadow-sm space-y-4 transition-colors ${
+    isEditingLocked
+      ? 'bg-slate-100 border-slate-300'
+      : 'bg-white border-slate-200'
+  }`}
+>
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-slate-800">Log Spare Parts Used</h2>
-              {isClosed && (
-                <span className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
-                  Locked — Verified Closed
-                </span>
-              )}
+              {isEditingLocked && (
+  <span className="text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
+    {isClosed
+      ? 'Verified Closed — Editing Disabled'
+      : 'Pending Review — Editing Disabled'}
+  </span>
+)}
             </div>
 
             <form
@@ -359,7 +373,7 @@ if (notFound) {
                 </label>
                 <select
   required
-  disabled={isClosed || submittingPart}
+  disabled={isEditingLocked || submittingPart}
   value={selectedPartId}
   onChange={(e) => setSelectedPartId(e.target.value)}
   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 bg-white disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-600"
@@ -385,14 +399,14 @@ if (notFound) {
   step="1"
   max={selectedPart?.stock_quantity ?? undefined}
   required
-  disabled={isClosed || submittingPart}
+  disabled={isEditingLocked || submittingPart}
   value={quantityUsed}
   onChange={(e) => setQuantityUsed(e.target.value)}
   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-600"
 />
                   <button
                     type="submit"
-                    disabled={isClosed || submittingPart}
+                    disabled={isEditingLocked || submittingPart}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap shadow-sm"
                   >
                     {submittingPart ? 'Logging...' : 'Log Part'}
@@ -429,19 +443,27 @@ if (notFound) {
 
         {/* Outcome Notes & Completion */}
         {!isReadOnly && (
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+          <div
+  className={`p-6 rounded-xl border shadow-sm space-y-4 transition-colors ${
+    isEditingLocked
+      ? 'bg-slate-100 border-slate-300'
+      : 'bg-white border-slate-200'
+  }`}
+>
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-slate-800">Outcome & Completion Notes</h2>
-              {isClosed && (
-                <span className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
-                  Verified Closed — Editing Disabled
-                </span>
-              )}
+              {isEditingLocked && (
+  <span className="text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
+    {isClosed
+      ? 'Verified Closed — Editing Disabled'
+      : 'Pending Review — Editing Disabled'}
+  </span>
+)}
             </div>
 
             <textarea
               rows={3}
-              disabled={isClosed || savingOutcome}
+              disabled={isEditingLocked || savingOutcome}
               value={outcomeNotes}
               onChange={(e) => setOutcomeNotes(e.target.value)}
               placeholder="Summarize work performed, test results, or recommendations..."
@@ -450,15 +472,17 @@ if (notFound) {
             <div className="flex justify-end">
               <button
   type="button"
-  disabled={isClosed || savingOutcome}
+  disabled={isEditingLocked || savingOutcome}
   onClick={handleSaveOutcome}
   className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
 >
   {isClosed
-    ? 'Verified Closed'
-    : savingOutcome
-    ? 'Saving...'
-    : 'Save Notes & Complete Task'}
+  ? 'Verified Closed'
+  : isPendingReview
+  ? 'Pending Review — Locked'
+  : savingOutcome
+  ? 'Saving...'
+  : 'Save Notes & Complete Task'}
 </button>
             </div>
           </div>

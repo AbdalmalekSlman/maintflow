@@ -1,0 +1,20 @@
+[Unit]
+Description=Pull the latest approved MaintFlow production release
+After=network-online.target
+ConditionPathIsSymbolicLink=/srv/maintflow/current
+
+[Service]
+Type=oneshot
+User=maintflow-deploy
+Group=maintflow-deploy
+SupplementaryGroups=maintflow-cache
+ExecStart=/usr/bin/python3 -B /usr/local/lib/maintflow/deploy_release.py --repo /var/lib/maintflow-deploy/CCPs-INST.git
+CPUQuota=50%
+MemoryAccounting=true
+MemoryMax=700000000
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+InaccessiblePaths=/opt/ot_tracker /etc/ot_tracker.env /etc/ot_tracker_git
+ReadWritePaths=/srv/maintflow /var/lib/maintflow-deploy
+UMask=0027
