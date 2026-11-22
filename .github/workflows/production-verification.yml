@@ -91,8 +91,39 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  approval-check:
+  attest:
     needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: maintflow-production-verification-${{ github.sha }}-linux
+          path: candidate
+      - name: Verify the candidate checksum
+        working-directory: candidate
+        run: sha256sum --check --strict SHA256SUMS
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        id: provenance
+        with:
+          subject-path: candidate/maintflow.tar.gz
+      - name: Preserve candidate provenance
+        env:
+          PROVENANCE_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: cp "$PROVENANCE_BUNDLE" provenance.jsonl
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: maintflow-production-provenance-${{ github.sha }}-linux
+          path: provenance.jsonl
+          if-no-files-found: error
+          retention-days: 7
+
+  approval-check:
+    needs: [verify, attest]
     runs-on: ubuntu-latest
     environment: maintflow-review-test
     timeout-minutes: 2
